@@ -1,6 +1,6 @@
 // Service worker: offline app shell. Market data (Alpaca) is never cached here —
 // candles are cached by the app itself in IndexedDB.
-const VERSION = 'avwap-pwa-v2';
+const VERSION = 'avwap-pwa-v8';
 const SHELL = ['./', './index.html', './manifest.webmanifest',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png'];
 const CDN_HOSTS = ['cdnjs.cloudflare.com', 'unpkg.com', 'cdn.jsdelivr.net'];

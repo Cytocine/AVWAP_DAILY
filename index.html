@@ -31,6 +31,11 @@
     #drawCanvas { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 3; }
     #chartContainer.tool-active, #chartContainer.tool-active * { cursor: crosshair !important; }
     #chartContainer.tool-hover, #chartContainer.tool-hover * { cursor: move !important; }
+    #optLabel { position: absolute; top: 8px; left: 8px; z-index: 6; min-width: 150px; max-width: 260px; padding: 6px 8px; border-radius: 8px;
+      background: rgba(11,15,23,0.86); border: 1px solid #334155; font-size: 11px; line-height: 1.35; color: #cbd5e1; backdrop-filter: blur(3px); }
+    #optLabel button { color: #94a3b8; }
+    #optLabel button:hover { color: #fff; }
+    @media (max-width: 640px) { #optLabel { max-width: 62vw; font-size: 10.5px; } }
     #cloudOverlayCanvas {
       position: absolute;
       top: 0;
@@ -85,7 +90,7 @@
       #drawToolbar button, #drawToolbar select { padding: 6px 12px; font-size: 13px; }
       #drawToolbar input[type=color] { width: 40px !important; height: 34px !important; }
       #wlTableBody td { padding-top: 10px; padding-bottom: 10px; }
-      #wlTableBody button[data-remove] { min-width: 36px; }
+      #wlTableBody button[data-remove], #wlTableBody button[data-dl] { min-width: 36px; }
     }
   </style>
 </head>
@@ -295,12 +300,33 @@
           <label class="flex items-center gap-1.5 text-xs text-gray-400" for="wlBullOnly">
             <input id="wlBullOnly" type="checkbox" class="accent-green-500"> Bullish only
           </label>
+          <button id="wlScanBtn" title="For each daily-bullish symbol: 30-min EMA10 > EMA20, then an options-chain volume check" class="bg-emerald-700 hover:bg-emerald-600 text-white font-semibold py-1 px-3 rounded text-xs flex items-center gap-1.5">
+            <span id="wlScanLabel">Scan 30m + Options</span>
+          </button>
           <button id="wlUpdateAllBtn" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold py-1 px-3 rounded text-xs flex items-center gap-1.5">
             <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> <span id="wlUpdateAllLabel">Update All</span>
           </button>
         </div>
       </div>
+      <form id="quickAddForm" class="flex gap-2">
+        <input id="quickAddInput" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"
+          placeholder="Add stock(s): NVDA, AMD …" class="flex-1 min-w-0 px-2 py-1 rounded text-xs font-semibold uppercase">
+        <button type="submit" class="bg-purple-600 hover:bg-purple-500 text-white font-semibold py-1 px-3 rounded text-xs whitespace-nowrap">Add &amp; download</button>
+      </form>
       <div id="wlTableBox" class="flex flex-col gap-2">
+      <div id="scanRow" class="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-gray-400">
+        <label class="flex items-center gap-1">Opt vol &gt; <input id="optMinVol" type="number" min="0" step="100" value="1000" class="w-20 px-1 py-0.5 rounded"></label>
+        <label class="flex items-center gap-1" title="Only contracts expiring at least this many days out (8 = more than 7 DTE)">Min DTE <input id="optMinDte" type="number" min="0" max="400" value="8" class="w-12 px-1 py-0.5 rounded"></label>
+        <label class="flex items-center gap-1">Max DTE <input id="optMaxDte" type="number" min="1" max="400" value="45" class="w-14 px-1 py-0.5 rounded"></label>
+        <label class="flex items-center gap-1">Type
+          <select id="optType" class="px-1 py-0.5 rounded"><option value="call">Calls</option><option value="">Calls + Puts</option></select></label>
+        <label class="flex items-center gap-1" title="indicative = free Alpaca options feed; opra = paid, full volume">Feed
+          <select id="optFeed" class="px-1 py-0.5 rounded"><option value="indicative">indicative</option><option value="opra">opra</option></select></label>
+        <label class="flex items-center gap-1.5"><input id="scanBullOnly" type="checkbox" class="accent-green-500" checked> Scan daily-bullish only</label>
+        <label class="flex items-center gap-1.5" title="Daily bullish + 30m EMA10 &gt; EMA20 + an option contract above the volume threshold"><input id="wlSetupOnly" type="checkbox" class="accent-green-500"> Setups only</label>
+        <label class="flex items-center gap-1.5" title="After Update All finishes, scan 30m + options for the daily-bullish symbols"><input id="scanAfterUpdate" type="checkbox" class="accent-green-500" checked> Auto-scan after Update All</label>
+        <button id="wlCsvBtn" type="button" class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-2 py-0.5 rounded text-xs">CSV</button>
+      </div>
       <div id="wlTableWrap" tabindex="0" class="overflow-x-auto scroll-dark max-h-64 overflow-y-auto" style="outline:none">
         <table class="w-full text-left text-xs">
           <thead class="text-gray-400 bg-gray-900 sticky top-0 border-b border-gray-800">
@@ -311,6 +337,8 @@
               <th class="p-2">Close</th>
               <th class="p-2">vs AVWAP</th>
               <th class="p-2">State</th>
+              <th class="p-2" title="30-minute EMA10 &gt; EMA20">30m</th>
+              <th class="p-2" title="Highest single-contract volume found in the scanned chain">Options</th>
               <th class="p-2"></th>
             </tr>
           </thead>
@@ -323,7 +351,7 @@
   </div>
 
   <!-- METRICS SUMMARY BANNER -->
-  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+  <div id="metricsBanner" style="display:none" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
     <div class="chart-box p-3 rounded-lg">
       <div class="text-[11px] text-gray-400">Total Trades</div>
       <div id="metricTrades" class="text-lg font-bold text-gray-200">0</div>
@@ -421,6 +449,9 @@
       <label class="flex items-center gap-1 text-xs text-gray-400" title="Empty bars kept to the right of the last candle">Right space
         <input id="rightSpace" type="number" min="0" max="200" value="12" class="px-1 py-0.5 rounded text-xs" style="width:52px">
       </label>
+      <label class="flex items-center gap-1 text-xs text-gray-400" title="Draw the top option strikes as horizontal lines on the chart"><input id="optLinesChk" type="checkbox" class="accent-cyan-500" checked> Strike lines</label>
+      <label class="flex items-center gap-1 text-xs text-gray-400" title="Automatically download options data for the symbol on the chart"><input id="optAuto" type="checkbox" class="accent-cyan-500" checked> Auto options</label>
+      <button id="cartAddBtn" title="Add this stock (and its top option contract) to the cart" class="bg-amber-600 hover:bg-amber-500 text-white font-semibold px-2.5 py-0.5 rounded text-xs whitespace-nowrap">🛒 Add to cart</button>
       <button id="exportPngBtn" title="Download chart as PNG (with cloud, AVWAP and drawings)" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-2.5 py-0.5 rounded text-xs">📷 PNG</button>
       <button id="copyPngBtn" title="Copy chart image to clipboard" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">Copy</button>
     </div>
@@ -430,8 +461,29 @@
       <div id="mainChart" class="w-full h-full"></div>
       <canvas id="cloudOverlayCanvas"></canvas>
       <canvas id="drawCanvas"></canvas>
+      <div id="optLabel" class="hidden"></div>
     </div>
   </div>
+
+  <!-- CART -->
+  <details id="cartDetails" class="chart-box p-3 rounded-lg cfg">
+    <summary>🛒 Cart <span id="cartCount" class="text-gray-400 font-normal ml-1">(0)</span></summary>
+    <div class="flex flex-col gap-2 pt-2">
+      <div class="flex flex-wrap gap-2">
+        <button id="cartTxtBtn" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3 py-1 rounded text-xs" title="Stock names only, one per line">⬇ Download cart</button>
+        <button id="cartClearBtn" class="bg-gray-700 hover:bg-red-700 text-gray-200 px-3 py-1 rounded text-xs">Clear</button>
+      </div>
+      <div class="overflow-x-auto scroll-dark max-h-64 overflow-y-auto">
+        <table class="w-full text-left text-xs">
+          <thead class="text-gray-400 bg-gray-900 sticky top-0 border-b border-gray-800">
+            <tr><th class="p-2">Symbol</th><th class="p-2">Contract</th><th class="p-2">Opt vol</th><th class="p-2 hm">Close</th><th class="p-2 hm">Added</th><th class="p-2"></th></tr>
+          </thead>
+          <tbody id="cartBody" class="divide-y divide-gray-800 text-gray-300"></tbody>
+        </table>
+      </div>
+      <div class="text-xs text-gray-500">Use <b>🛒 Add to cart</b> on the chart, or the ＋ next to a contract in the options label. <b>Download cart</b> saves the stock names only, one per line.</div>
+    </div>
+  </details>
 
   <!-- TRADE LOG -->
   <div class="chart-box p-3 rounded-lg flex flex-col gap-2">
@@ -771,6 +823,19 @@
     let loadToken = 0;
     let rowsToken = 0;
     let rowInfo = new Map();
+    // 30m EMA + options scan results, per symbol (kept separate from the daily candle cache)
+    const OPT_KEY = 'avwap_optscan_v1';
+    let optScan = new Map();
+    try { optScan = new Map(Object.entries(JSON.parse(localStorage.getItem(OPT_KEY) || '{}'))); } catch (e) {}
+    function saveOptScan() { try { localStorage.setItem(OPT_KEY, JSON.stringify(Object.fromEntries(optScan))); } catch (e) {} }
+    function optMinDte() { const v = parseInt($('optMinDte').value); return isNaN(v) ? 8 : v; }
+    function optMin() { const v = parseInt($('optMinVol').value); return isNaN(v) ? 1000 : v; }
+    function setupState(sym) {
+      const i = rowInfo.get(sym), sc = optScan.get(sym);
+      const d = !!(i && i.state && i.state.bull), m = !!(sc && sc.bull30);
+      const o = !!(sc && sc.optVol != null && sc.optVol > optMin());
+      return { d, m, o, all: d && m && o };
+    }
 
     function cacheKey(symbol, timeframe, feed) {
       return `${symbol}|${timeframe}|${feed}`;
@@ -1008,6 +1073,7 @@
       if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
       drawings = []; draft = null; selectedId = null; drawKeyCur = '';
       renderDrawings();
+      renderOptLabel();
     }
 
     function showRecord(rec, statusText, statusType) {
@@ -1020,6 +1086,8 @@
       runStrategyAndRender();
       afterShow(rec);
       updateWatermark(rec.symbol, rec.timeframe);
+      renderOptLabel();
+      autoOptions(rec.symbol);
     }
 
     // Select a symbol: show cached candles instantly; fetch only if nothing is cached.
@@ -1208,8 +1276,9 @@
     }
 
     function visibleSymbols() {
-      const bullOnly = $('wlBullOnly').checked;
+      const bullOnly = $('wlBullOnly').checked, setupOnly = $('wlSetupOnly').checked;
       return currentList().filter(s => {
+        if (setupOnly) return setupState(s).all;
         if (!bullOnly) return true;
         const i = rowInfo.get(s);
         return i && i.state && i.state.bull;
@@ -1225,7 +1294,7 @@
       $('wlCount').textContent = all.length ? `(${syms.length === all.length ? all.length : syms.length + ' of ' + all.length})` : '';
 
       if (!syms.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="p-3 text-center text-gray-500">${
+        tbody.innerHTML = `<tr><td colspan="9" class="p-3 text-center text-gray-500">${
           all.length ? 'No symbols match the current filter.' : 'Watchlist is empty. Paste symbols on the left and click Save List.'}</td></tr>`;
         return;
       }
@@ -1236,6 +1305,16 @@
         const pillCls = st ? (st.bull ? 'text-green-400' : 'text-gray-400') : 'text-gray-600';
         const pill = st ? (st.bull ? '● Bullish' : '○ Neutral / Bear') : '—';
         const pctCls = st ? (st.pct >= 0 ? 'text-green-400' : 'text-red-400') : 'text-gray-600';
+        const sc = optScan.get(sym), ss = setupState(sym);
+        const fmtN = n => Number(n).toLocaleString();
+        const c30 = !sc ? '<span class="text-gray-600">—</span>'
+          : sc.bull30 === null ? `<span class="text-amber-400" title="${sc.err || 'no data'}">n/a</span>`
+          : `<span class="${sc.bull30 ? 'text-green-400' : 'text-gray-500'}" title="EMA10 ${sc.e10 != null ? sc.e10.toFixed(2) : '?'} / EMA20 ${sc.e20 != null ? sc.e20.toFixed(2) : '?'} • ${sc.t ? new Date(sc.t).toLocaleString() : ''}">${sc.bull30 ? '✓ 10>20' : '✗'}</span>`;
+        const cOpt = !sc ? '<span class="text-gray-600">—</span>'
+          : sc.optErr ? `<span class="text-amber-400" title="${String(sc.optErr).replace(/"/g, '')}">err</span>`
+          : sc.optVol == null ? '<span class="text-gray-600" title="Skipped: 30m EMA10 is not above EMA20">skipped</span>'
+          : `<span class="${ss.o ? 'text-green-400' : 'text-gray-400'}" title="${sc.optSym || ''}">${ss.o ? '✓' : '✗'} ${fmtN(sc.optVol)}</span>` +
+            (sc.optSym ? `<span class="hm text-gray-500"> ${sc.optStrike}${sc.optType} ${String(sc.optExp || '').slice(5)}</span>` : '');
         return `<tr data-sym="${sym}" class="cursor-pointer hover:bg-gray-800 ${isActive ? 'bg-gray-800' : ''}">
           <td class="p-2 font-semibold ${isActive ? 'text-white' : 'text-gray-200'}">${sym}</td>
           <td class="p-2 text-gray-400 hm">${info ? info.n : '—'}</td>
@@ -1243,10 +1322,275 @@
           <td class="p-2 font-mono">${st ? '$' + st.close.toFixed(2) : '—'}</td>
           <td class="p-2 font-mono ${pctCls}">${st ? (st.pct >= 0 ? '+' : '') + st.pct.toFixed(1) + '%' : '—'}</td>
           <td class="p-2 ${pillCls}">${pill}</td>
-          <td class="p-2 text-right"><button data-remove="${sym}" title="Remove from list (cached candles are kept)" class="text-gray-500 hover:text-red-400 px-1">✕</button></td>
+          <td class="p-2 whitespace-nowrap">${c30}</td>
+          <td class="p-2 whitespace-nowrap">${cOpt}</td>
+          <td class="p-2 text-right whitespace-nowrap"><button data-dl="${sym}" title="Download / update this stock and scan 30m + options" class="text-gray-500 hover:text-blue-400 px-1">⟳</button><button data-remove="${sym}" title="Remove from list (cached candles are kept)" class="text-gray-500 hover:text-red-400 px-1">✕</button></td>
         </tr>`;
       }).join('');
     }
+
+    // =====================================================================
+    // 30-minute EMA10 > EMA20 + options-chain volume scan
+    // =====================================================================
+    const enc = encodeURIComponent;
+    let scanning = false, scanAbort = false;
+
+    async function apiThrottled(url) { const r = await alpacaGet(url); await sleep(330); return r; }   // stay under ~200 calls/min
+
+    async function scan30m(sym, feed) {
+      const start = new Date(Date.now() - 16 * 86400000).toISOString();
+      const data = await apiThrottled(`https://data.alpaca.markets/v2/stocks/${enc(sym)}/bars?timeframe=30Min&start=${enc(start)}` +
+        `&limit=1000&feed=${enc(feed)}&adjustment=split&sort=asc`);
+      const closes = (data.bars || []).map(b => b.c);
+      if (closes.length < 25) return { bull30: null, err: `only ${closes.length} 30m bars` };
+      const e10 = calculateEMA(closes, 10), e20 = calculateEMA(closes, 20), i = closes.length - 1;
+      return { e10: e10[i], e20: e20[i], bull30: e10[i] > e20[i], spot: closes[i] };
+    }
+
+    function parseOcc(o) {
+      const m = /^([A-Z]{1,6})(\d{2})(\d{2})(\d{2})([CP])(\d{8})$/.exec(o);
+      return m ? { type: m[5], exp: `20${m[2]}-${m[3]}-${m[4]}`, strike: parseInt(m[6], 10) / 1000 } : null;
+    }
+
+    // Walks the (filtered) option chain and stops as soon as one contract beats the volume threshold.
+    async function scanChain(sym, spot, minVol) {
+      const root = sym.replace(/[.\-]/g, '');
+      const maxDte = parseInt($('optMaxDte').value) || 45, type = $('optType').value, feed = $('optFeed').value;
+      const minDte = optMinDte();
+      const today = etParts(Date.now() + minDte * 86400000).date, last = etParts(Date.now() + Math.max(maxDte, minDte) * 86400000).date;
+      const base = `https://data.alpaca.markets/v1beta1/options/snapshots/${enc(root)}?feed=${enc(feed)}&limit=1000` +
+        `&expiration_date_gte=${today}&expiration_date_lte=${last}` +
+        `&strike_price_gte=${(spot * 0.8).toFixed(2)}&strike_price_lte=${(spot * 1.2).toFixed(2)}` + (type ? `&type=${type}` : '');
+      let best = null, seen = 0, hasVol = false, token = null, pages = 0;
+      const all = [];
+      do {
+        const data = await apiThrottled(base + (token ? `&page_token=${enc(token)}` : ''));
+        for (const [osym, sn] of Object.entries(data.snapshots || {})) {
+          seen++;
+          if (sn.dailyBar && sn.dailyBar.v != null) hasVol = true;
+          const v = (sn.dailyBar && sn.dailyBar.v) || 0;
+          const c = { vol: v, osym, ...(parseOcc(osym) || {}) };
+          all.push(c);
+          if (!best || v > best.vol) best = c;
+        }
+        token = data.next_page_token; pages++;
+        if (best && best.vol > minVol) break;
+      } while (token && pages < 4);
+      const top = all.filter(c => c.vol > 0 && c.strike != null).sort((a, b) => b.vol - a.vol).slice(0, 1)
+        .map(c => ({ osym: c.osym, type: c.type, strike: c.strike, exp: c.exp, vol: c.vol }));
+      return { best, seen, hasVol, top };
+    }
+
+    async function scanOne(sym, { always = false } = {}) {
+      const rec = { t: new Date().toISOString(), bull30: null, optVol: null };
+      const m = await scan30m(sym, $('feedType').value);
+      Object.assign(rec, { e10: m.e10, e20: m.e20, bull30: m.bull30 });
+      const dc = rowInfo.get(sym) && rowInfo.get(sym).state ? rowInfo.get(sym).state.close : null;
+      const spot = m.spot || dc;
+      if (m.bull30 === null) rec.err = m.err;
+      if (!always && !m.bull30) return rec;              // bulk scans: options only matter when 30m is bullish
+      if (!spot) return rec;
+      try {
+        const r = await scanChain(sym, spot, optMin());
+        rec.top = r.top; rec.minDte = optMinDte();
+        if (!r.seen) { rec.optVol = 0; rec.optErr = 'no contracts in range'; }
+        else if (!r.hasVol) { rec.optErr = 'feed returned no volume (try opra feed)'; }
+        else { rec.optVol = r.best.vol; rec.optSym = r.best.osym; rec.optStrike = r.best.strike; rec.optType = r.best.type; rec.optExp = r.best.exp; }
+      } catch (e) {
+        if (e.status === 401 || e.status === 403) throw e;   // no options access — stop the whole scan
+        rec.optErr = e.message;
+      }
+      return rec;
+    }
+
+    async function scanAll(opts) {
+      const quiet = !!(opts && opts.quiet === true);
+      if (scanning) { scanAbort = true; return; }
+      if (busy) { if (!quiet) alert('A download is running. Wait for it to finish first.'); return; }
+      if (cacheOnly()) { alert('Cache-only mode is on. Untick it to call Alpaca.'); return; }
+      if (!hasCreds()) { alert('Please enter your Alpaca API Key and Secret in the top panel.'); return; }
+      let list = currentList().slice();
+      if ($('scanBullOnly').checked) list = list.filter(s => { const i = rowInfo.get(s); return i && i.state && i.state.bull; });
+      if (!list.length) { if (!quiet) alert('Nothing to scan. Run Update All first — by default only daily-bullish symbols are scanned.'); return; }
+      scanning = true; scanAbort = false;
+      $('wlScanLabel').textContent = 'Stop scan';
+      let done = 0, authFail = null;
+      for (let i = 0; i < list.length; i++) {
+        if (scanAbort) break;
+        const sym = list[i];
+        $('wlProgress').textContent = `Scanning ${i + 1}/${list.length}: ${sym}`;
+        try { optScan.set(sym, await scanOne(sym)); done++; }
+        catch (e) {
+          if (e.status === 401 || e.status === 403) { authFail = e.message; break; }
+          optScan.set(sym, { t: new Date().toISOString(), bull30: null, err: e.message });
+        }
+        if (i % 8 === 7) { saveOptScan(); renderWatchlistTable(); }
+      }
+      scanning = false;
+      $('wlScanLabel').textContent = 'Scan 30m + Options';
+      saveOptScan(); renderWatchlistTable();
+      const setups = currentList().filter(s => setupState(s).all).length;
+      $('wlProgress').textContent = scanAbort ? `Scan stopped (${done} scanned)` : `Scanned ${done} • ${setups} setup${setups === 1 ? '' : 's'}`;
+      setStatus(authFail ? `Scan stopped: ${authFail}` : `Scanned ${done} • ${setups} setups`, authFail ? 'red' : 'green');
+      if (authFail) alert(`Alpaca refused the request: ${authFail}\n\nOptions data needs an account with options market-data access (the free "indicative" feed works on most accounts).`);
+    }
+
+    // Download / update ONE stock (daily candles) and scan its 30m + options
+    async function downloadOne(sym) {
+      if (busy || scanning) { alert('Another update is running. Wait or press Stop first.'); return false; }
+      if (cacheOnly()) { alert('Cache-only mode is on. Untick it to call Alpaca.'); return false; }
+      if (!hasCreds()) { alert('Please enter your Alpaca API Key and Secret in the top panel.'); return false; }
+      busy = true; let ok = false;
+      try {
+        $('wlProgress').textContent = `${sym}: downloading…`;
+        setStatus(`Downloading ${sym}…`, 'amber');
+        const { rec } = await syncSymbol(sym, $('timeframeSelect').value, $('feedType').value, currentLimit(), false);
+        setRowInfo(sym, rec); ok = true;
+        $('wlProgress').textContent = `${sym}: scanning 30m + options…`;
+        try { optScan.set(sym, await scanOne(sym)); saveOptScan(); }
+        catch (e) { optScan.set(sym, { t: new Date().toISOString(), bull30: null, err: e.message }); }
+        const ss = setupState(sym);
+        $('wlProgress').textContent = `${sym}: ${ss.all ? 'SETUP ✓' : 'updated'}`;
+        setStatus(`${sym} updated${ss.all ? ' • setup ✓' : ''}`, 'green');
+      } catch (e) {
+        setStatus(`${sym}: ${e.message}`, 'red');
+        alert(`${sym}: ${e.message}`);
+      } finally { busy = false; renderWatchlistTable(); refreshCacheStats(); }
+      return ok;
+    }
+
+    function exportTableCsv() {
+      const q = v => { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
+      const rows = [['Symbol', 'Cached bars', 'Last bar', 'Close', 'vs AVWAP %', 'Daily state', '30m EMA10', '30m EMA20', '30m EMA10>EMA20',
+        'Option max volume', 'Option contract', 'Setup']];
+      for (const sym of visibleSymbols()) {
+        const i = rowInfo.get(sym), st = i && i.state, sc = optScan.get(sym) || {}, ss = setupState(sym);
+        rows.push([sym, i ? i.n : '', i ? fmtBarTime(i.last, i.timeframe) : '', st ? st.close.toFixed(2) : '', st ? st.pct.toFixed(2) : '',
+          st ? (st.bull ? 'Bullish' : 'Neutral/Bear') : '', sc.e10 != null ? sc.e10.toFixed(2) : '', sc.e20 != null ? sc.e20.toFixed(2) : '',
+          sc.bull30 == null ? '' : (sc.bull30 ? 'yes' : 'no'), sc.optVol == null ? '' : sc.optVol, sc.optSym || '', ss.all ? 'YES' : '']);
+      }
+      const blob = new Blob([rows.map(r => r.map(q).join(',')).join('\n')], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `watchlist_scan_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }
+
+    // =====================================================================
+    // Options label + strike lines on the chart, auto-download, cart
+    // =====================================================================
+    const optInflight = new Set();
+    let optLines = [], optCollapsed = false;
+    try { optCollapsed = localStorage.getItem('avwap_optlabel_collapsed') === '1'; } catch (e) {}
+    const fmtN0 = n => Number(n).toLocaleString();
+    const shortN = n => { n = Number(n); return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n); };
+    const activeSym = () => $('symbolInput').value.trim().toUpperCase();
+    const esc = v => String(v == null ? '' : v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    function clearOptLines() {
+      if (candleSeries) optLines.forEach(l => { try { candleSeries.removePriceLine(l); } catch (e) {} });
+      optLines = [];
+    }
+    function drawOptLines(sc) {
+      clearOptLines();
+      if (!candleSeries || !sc || !Array.isArray(sc.top) || !$('optLinesChk').checked) return;
+      sc.top.forEach((c, i) => {
+        try {
+          optLines.push(candleSeries.createPriceLine({
+            price: c.strike, color: c.type === 'C' ? '#22d3ee' : '#f472b6', lineWidth: 1, lineStyle: 2,
+            axisLabelVisible: i === 0, title: `${c.strike}${c.type} ${String(c.exp).slice(5)} v${shortN(c.vol)}`
+          }));
+        } catch (e) {}
+      });
+    }
+
+    function renderOptLabel() {
+      const el = $('optLabel'); if (!el) return;
+      const sym = activeSym();
+      if (!sym || !rawBars || !rawBars.length) { el.classList.add('hidden'); clearOptLines(); return; }
+      el.classList.remove('hidden');
+      const sc = optScan.get(sym), loading = optInflight.has(sym), canFetch = hasCreds() && !cacheOnly();
+      const head = `<div class="flex items-center justify-between gap-3">
+        <button data-optcollapse type="button" class="font-semibold text-gray-200">${optCollapsed ? '▸' : '▾'} OPTION · ${esc(sym)}</button>
+        <button data-optrefresh type="button" title="Refresh options data">${loading ? '…' : '⟳'}</button></div>`;
+      if (optCollapsed) { el.innerHTML = head; drawOptLines(sc); return; }
+      let body = '';
+      if (loading) body = '<div class="text-gray-400 pt-1">Loading options…</div>';
+      else if (!sc || (sc.top === undefined && !sc.optErr)) {
+        body = `<div class="text-gray-400 pt-1">${canFetch ? 'No options data yet — tap ⟳' : 'Add API keys (or leave cache-only) to load options'}</div>`;
+      } else {
+        const m30 = sc.bull30 === null || sc.bull30 === undefined ? '<span class="text-gray-500">30m: n/a</span>'
+          : `<span class="${sc.bull30 ? 'text-green-400' : 'text-gray-400'}">30m EMA10 ${sc.bull30 ? '>' : '≤'} EMA20 ${sc.bull30 ? '✓' : '✗'}</span>`;
+        body = `<div class="pt-1">${m30}</div>`;
+        if (sc.optErr) body += `<div class="text-amber-400">${esc(sc.optErr)}</div>`;
+        if (Array.isArray(sc.top)) body += sc.top.map((c, i) => `<div class="flex items-center justify-between gap-2">
+          <span class="${i === 0 ? 'text-white font-semibold' : ''}" style="color:${c.type === 'C' ? '#22d3ee' : '#f472b6'}">${c.strike}${c.type} ${esc(String(c.exp).slice(5))}</span>
+          <span class="${c.vol > optMin() ? 'text-green-400' : 'text-gray-400'}">vol ${fmtN0(c.vol)}</span>
+          <button data-cartadd="${i}" type="button" title="Add this contract to the cart">＋🛒</button></div>`).join('');
+        body += `<div class="text-gray-500 pt-0.5">${sc.t ? 'as of ' + new Date(sc.t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''} · ${esc($('optFeed').value)}</div>`;
+      }
+      el.innerHTML = head + body;
+      drawOptLines(sc);
+    }
+
+    // Automatically download options data for the symbol that is on the chart
+    async function autoOptions(sym, force) {
+      if (!force && !$('optAuto').checked) return;
+      if (cacheOnly() || !hasCreds() || optInflight.has(sym)) return;
+      const sc = optScan.get(sym);
+      const fresh = sc && sc.t && Date.now() - Date.parse(sc.t) < 15 * 60000 && (Array.isArray(sc.top) || sc.optErr) && sc.minDte === optMinDte();
+      if (!force && fresh) return;
+      optInflight.add(sym); renderOptLabel();
+      try { optScan.set(sym, await scanOne(sym, { always: true })); saveOptScan(); }
+      catch (e) { optScan.set(sym, { t: new Date().toISOString(), bull30: null, optVol: null, optErr: e.message }); }
+      finally { optInflight.delete(sym); renderWatchlistTable(); if (activeSym() === sym) renderOptLabel(); }
+    }
+
+    // ---- Cart ----
+    const CART_KEY = 'avwap_cart_v1';
+    let cart = [];
+    try { cart = JSON.parse(localStorage.getItem(CART_KEY) || '[]'); if (!Array.isArray(cart)) cart = []; } catch (e) { cart = []; }
+    function saveCart() { try { localStorage.setItem(CART_KEY, JSON.stringify(cart)); } catch (e) {} }
+
+    function cartAdd(sym, c) {
+      const key = `${sym}|${c ? c.osym : ''}`;
+      if (cart.some(x => x.key === key)) { setStatus(`${sym}${c ? ' ' + c.strike + c.type : ''} is already in the cart`, 'amber'); return; }
+      const st = rowInfo.get(sym) && rowInfo.get(sym).state, sc = optScan.get(sym) || {};
+      cart.push({
+        key, sym, osym: c ? c.osym : '', type: c ? c.type : '', strike: c ? c.strike : '', exp: c ? c.exp : '', vol: c ? c.vol : '',
+        close: st ? +st.close.toFixed(2) : '', pct: st ? +st.pct.toFixed(2) : '', daily: st ? (st.bull ? 'Bullish' : 'Neutral/Bear') : '',
+        bull30: sc.bull30 == null ? '' : (sc.bull30 ? 'yes' : 'no'), added: new Date().toISOString()
+      });
+      saveCart(); renderCart();
+      setStatus(`Added ${sym}${c ? ' ' + c.strike + c.type : ''} to cart (${cart.length})`, 'green');
+    }
+
+    function renderCart() {
+      $('cartCount').textContent = `(${cart.length})`;
+      $('cartBody').innerHTML = cart.length ? cart.map((x, i) => `<tr data-cartsym="${esc(x.sym)}" class="cursor-pointer hover:bg-gray-800">
+        <td class="p-2 font-semibold text-gray-200">${esc(x.sym)}</td>
+        <td class="p-2 whitespace-nowrap">${x.osym ? `${esc(x.strike)}${esc(x.type)} ${esc(String(x.exp).slice(5))}` : '<span class="text-gray-600">stock only</span>'}</td>
+        <td class="p-2">${x.vol !== '' ? fmtN0(x.vol) : '—'}</td>
+        <td class="p-2 hm">${x.close !== '' ? '$' + x.close : '—'}</td>
+        <td class="p-2 hm text-gray-500">${new Date(x.added).toLocaleDateString([], { month: 'short', day: 'numeric' })}</td>
+        <td class="p-2 text-right whitespace-nowrap"><button data-cartrm="${i}" title="Remove" class="text-gray-500 hover:text-red-400 px-1.5">✕</button></td></tr>`).join('')
+        : '<tr><td colspan="6" class="p-3 text-center text-gray-500">Cart is empty.</td></tr>';
+    }
+
+    const CART_HEAD = ['Symbol', 'Option contract', 'Type', 'Strike', 'Expiry', 'Option volume', 'Close at add', 'vs AVWAP %', 'Daily state', '30m EMA10>EMA20', 'Added'];
+    const cartLine = x => [x.sym, x.osym, x.type, x.strike, x.exp, x.vol, x.close, x.pct, x.daily, x.bull30, x.added];
+    function downloadText(name, text, mime) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([text], { type: mime }));
+      a.download = name; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }
+    function csvOf(rows) {
+      const q = v => { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
+      return rows.map(r => r.map(q).join(',')).join('\n');
+    }
+    const stamp = () => new Date().toISOString().slice(0, 10);
 
     // ---- "Is this cached daily series already current?" (US market, America/New_York) ----
     function etParts(ms) {
@@ -1318,6 +1662,7 @@
       await refreshCacheStats();
       selectSymbol($('symbolInput').value, { fetchIfMissing: false });
       if ($('fsAutoSave').checked && fsHandle && !updateAbort && ok) { await fsSave(true); }
+      if ($('scanAfterUpdate').checked && !updateAbort && ok && hasCreds()) scanAll({ quiet: true });
     }
 
     // ---- Cache export / import / clear ----
@@ -1767,7 +2112,14 @@
       }
     });
 
-    $('wlTableBody').addEventListener('click', e => {
+    $('wlTableBody').addEventListener('click', async e => {
+      const dl = e.target.closest('[data-dl]');
+      if (dl) {
+        const sym = dl.getAttribute('data-dl');
+        await downloadOne(sym);
+        if (sym === $('symbolInput').value.trim().toUpperCase()) selectSymbol(sym, { fetchIfMissing: false });
+        return;
+      }
       const rm = e.target.closest('[data-remove]');
       if (rm) {
         const sym = rm.getAttribute('data-remove');
@@ -1794,6 +2146,77 @@
     });
 
     $('wlBullOnly').addEventListener('change', renderWatchlistTable);
+    $('wlSetupOnly').addEventListener('change', renderWatchlistTable);
+    $('optLabel').addEventListener('click', e => {
+      if (e.target.closest('[data-optcollapse]')) {
+        optCollapsed = !optCollapsed;
+        try { localStorage.setItem('avwap_optlabel_collapsed', optCollapsed ? '1' : '0'); } catch (err) {}
+        renderOptLabel(); return;
+      }
+      if (e.target.closest('[data-optrefresh]')) {
+        if (!hasCreds()) { alert('Please enter your Alpaca API Key and Secret in the top panel.'); return; }
+        autoOptions(activeSym(), true); return;
+      }
+      const add = e.target.closest('[data-cartadd]');
+      if (add) {
+        const sc = optScan.get(activeSym()), c = sc && sc.top && sc.top[parseInt(add.getAttribute('data-cartadd'))];
+        if (c) cartAdd(activeSym(), c);
+      }
+    });
+    $('cartAddBtn').addEventListener('click', () => {
+      const sym = activeSym(); if (!sym || !rawBars.length) return;
+      const sc = optScan.get(sym);
+      cartAdd(sym, sc && sc.top && sc.top[0] ? sc.top[0] : null);
+    });
+    $('optLinesChk').addEventListener('change', () => drawOptLines(optScan.get(activeSym())));
+    $('optMinVol').addEventListener('input', renderOptLabel);
+    $('cartBody').addEventListener('click', e => {
+      const rm = e.target.closest('[data-cartrm]');
+      if (rm) { cart.splice(parseInt(rm.getAttribute('data-cartrm')), 1); saveCart(); renderCart(); return; }
+      const tr = e.target.closest('tr[data-cartsym]');
+      if (tr) selectSymbol(tr.getAttribute('data-cartsym'), { fetchIfMissing: false });
+    });
+    $('cartTxtBtn').addEventListener('click', () => {
+      if (!cart.length) { alert('The cart is empty.'); return; }
+      downloadText(`cart_${stamp()}.txt`, [...new Set(cart.map(x => x.sym))].join('\n'), 'text/plain');
+    });
+    $('cartClearBtn').addEventListener('click', () => { if (cart.length && confirm('Remove all items from the cart?')) { cart = []; saveCart(); renderCart(); } });
+    renderCart();
+    $('optMinVol').addEventListener('input', renderWatchlistTable);
+    $('wlScanBtn').addEventListener('click', scanAll);
+    $('wlCsvBtn').addEventListener('click', exportTableCsv);
+    $('quickAddForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const syms = parseSymbols($('quickAddInput').value);
+      if (!syms.length) return;
+      $('quickAddInput').value = '';
+      const fresh = syms.filter(x => !currentList().includes(x));
+      if (fresh.length) {                                   // new symbols go to the top so they are visible
+        wl.lists[wl.active] = [...fresh, ...currentList()];
+        saveWatchlists(); renderWatchlistEditor(); renderWatchlistTable();
+        $('wlTableWrap').scrollTop = 0;
+      }
+      for (const sym of syms) {
+        const ok = await downloadOne(sym);
+        if (!ok && fresh.includes(sym)) {                   // bad ticker / failed download: don't keep it
+          wl.lists[wl.active] = currentList().filter(x => x !== sym);
+          saveWatchlists(); renderWatchlistEditor(); renderWatchlistTable();
+        }
+      }
+      selectSymbol(syms[syms.length - 1], { fetchIfMissing: false });
+    });
+    // remember scan settings
+    {
+      const CK = 'avwap_scan_cfg_v1', ids = ['optMinVol', 'optMinDte', 'optMaxDte', 'optType', 'optFeed'], chk = ['scanBullOnly', 'wlSetupOnly', 'optAuto', 'optLinesChk', 'scanAfterUpdate'];
+      try {
+        const c = JSON.parse(localStorage.getItem(CK) || '{}');
+        ids.forEach(id => { if (c[id] !== undefined) $(id).value = c[id]; });
+        chk.forEach(id => { if (c[id] !== undefined) $(id).checked = c[id]; });
+      } catch (e) {}
+      const save = () => { const c = {}; ids.forEach(id => c[id] = $(id).value); chk.forEach(id => c[id] = $(id).checked);
+        try { localStorage.setItem(CK, JSON.stringify(c)); } catch (e) {} };
+      [...ids, ...chk].forEach(id => $(id).addEventListener('change', save));
+    }
     $('wlUpdateAllBtn').addEventListener('click', updateAll);
 
     $('cacheOnly').addEventListener('change', () => {

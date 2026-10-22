@@ -287,7 +287,9 @@
     <!-- Watchlist table -->
     <div id="wlTableCard" class="chart-box p-3.5 rounded-lg lg:col-span-2 flex flex-col gap-2 order-first lg:order-none">
       <div class="flex flex-wrap items-center justify-between gap-2">
-        <span class="text-xs font-semibold text-gray-200">WATCHLIST <span id="wlCount" class="text-gray-500 font-normal"></span></span>
+        <button id="wlTableToggle" type="button" aria-expanded="true" title="Show / hide the watchlist table" class="text-xs font-semibold text-gray-200 flex items-center gap-1.5 text-left">
+          <span id="wlTableArrow" class="text-gray-400">▾</span> WATCHLIST <span id="wlCount" class="text-gray-500 font-normal"></span>
+        </button>
         <div class="flex items-center gap-3 flex-wrap">
           <span id="wlProgress" class="text-xs text-gray-400"></span>
           <label class="flex items-center gap-1.5 text-xs text-gray-400" for="wlBullOnly">
@@ -298,6 +300,7 @@
           </button>
         </div>
       </div>
+      <div id="wlTableBox" class="flex flex-col gap-2">
       <div id="wlTableWrap" tabindex="0" class="overflow-x-auto scroll-dark max-h-64 overflow-y-auto" style="outline:none">
         <table class="w-full text-left text-xs">
           <thead class="text-gray-400 bg-gray-900 sticky top-0 border-b border-gray-800">
@@ -315,6 +318,7 @@
         </table>
       </div>
       <div class="text-xs text-gray-500">Click a symbol to load it (cached candles load instantly). Focus the list and use ↑ / ↓ to step through. State uses the current strategy parameters and the timeframe/feed selected above.</div>
+      </div>
     </div>
   </div>
 
@@ -2542,6 +2546,21 @@
       const save = () => { try { localStorage.setItem(PK, JSON.stringify({ cfg: $('cfgDetails').open, wl: $('wlEditDetails').open })); } catch (e) {} };
       $('cfgDetails').addEventListener('toggle', save);
       $('wlEditDetails').addEventListener('toggle', () => { sync(); save(); });
+
+      // Show / hide the watchlist table (header with Update All stays visible)
+      const TK = 'avwap_wltable_hidden';
+      const applyTbl = hidden => {
+        $('wlTableBox').classList.toggle('hidden', hidden);
+        $('wlTableArrow').textContent = hidden ? '▸' : '▾';
+        $('wlTableToggle').setAttribute('aria-expanded', String(!hidden));
+      };
+      let hid = false; try { hid = localStorage.getItem(TK) === '1'; } catch (e) {}
+      applyTbl(hid);
+      $('wlTableToggle').addEventListener('click', () => {
+        hid = !hid; applyTbl(hid);
+        try { localStorage.setItem(TK, hid ? '1' : '0'); } catch (e) {}
+        window.dispatchEvent(new Event('resize'));
+      });
     }
     {
       const sym = $('symbolInput').value.trim().toUpperCase(); const ms = $('mobSym'); if (ms) ms.textContent = sym || '—';

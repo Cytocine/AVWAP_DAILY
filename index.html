@@ -1,0 +1,2557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Alpaca AVWAP & True EMA Cloud Strategy</title>
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0b0f17">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="AVWAP Cloud">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <!-- Precompiled Tailwind CSS (No console warning) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css" />
+  <!-- Lightweight Charts v4 -->
+  <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+  <!-- Lucide Icons -->
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.263.1/dist/umd/lucide.min.js"></script>
+  <style>
+    body { background-color: #0b0f17; color: #cbd5e1; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .chart-box { border: 1px solid #1e293b; background: #0f172a; position: relative; }
+    input, select, textarea { background: #1e293b; border: 1px solid #334155; color: #f8fafc; font-size: 0.85rem; }
+    input:focus, select:focus, textarea:focus { outline: none; border-color: #3b82f6; }
+    textarea { resize: vertical; }
+    .scroll-dark::-webkit-scrollbar { width: 6px; height: 6px; }
+    .scroll-dark::-webkit-scrollbar-track { background: #0f172a; }
+    .scroll-dark::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+    #drawCanvas { position: absolute; top: 0; left: 0; pointer-events: none; z-index: 3; }
+    #chartContainer.tool-active, #chartContainer.tool-active * { cursor: crosshair !important; }
+    #chartContainer.tool-hover, #chartContainer.tool-hover * { cursor: move !important; }
+    #cloudOverlayCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      pointer-events: none;
+      z-index: 2;
+    }
+
+    /* ---------- Mobile-friendly layer ---------- */
+    html { -webkit-text-size-adjust: 100%; }
+    body { display: flex; flex-direction: column; }
+    body { overscroll-behavior-y: contain; padding-left: max(0.75rem, env(safe-area-inset-left)); padding-right: max(0.75rem, env(safe-area-inset-right)); }
+    .chart-wrap { height: 520px; }
+    details.cfg > summary { cursor: pointer; list-style: none; display: flex; align-items: center; justify-content: space-between; font-size: 12px; font-weight: 600; color: #e2e8f0; min-height: 36px; user-select: none; }
+    details.cfg > summary::-webkit-details-marker { display: none; }
+    details.cfg > summary::after { content: '▾'; color: #94a3b8; font-size: 14px; }
+    details.cfg[open] > summary::after { content: '▴'; }
+    #mobileBar { display: none; }
+    @media (max-width: 1023px) {
+      body > header { order: -3; }
+      #chartSection { order: -2; }
+      #wlSection { order: -1; }
+      body { padding-bottom: calc(68px + env(safe-area-inset-bottom)); gap: 0.75rem; }
+      .chart-wrap { height: clamp(320px, 60vh, 640px); height: clamp(320px, 60dvh, 640px); }
+      #wlTableWrap { max-height: 36vh; }
+      #mobileBar { display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; gap: 8px; align-items: center; justify-content: space-between;
+        padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: rgba(11,15,23,0.96); border-top: 1px solid #1e293b; backdrop-filter: blur(6px); }
+      #mobileBar button { min-height: 44px; min-width: 56px; border-radius: 8px; font-size: 16px; font-weight: 700; color: #e2e8f0; background: #334155; }
+      #mobileBar #mobPlay { background: #16a34a; color: #fff; min-width: 64px; }
+      #mobileBar #mobSym { flex: 1; text-align: center; font-weight: 700; font-size: 16px; color: #fff; letter-spacing: .03em; }
+      #drawToolbar { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 6px; scrollbar-width: thin; }
+      #drawToolbar > * { flex: 0 0 auto; }
+      .hdr-sub { display: none; }
+    }
+    @media (max-width: 640px) {
+      .hm { display: none; }
+      #chartSection .legend { display: none; }
+      body { padding-top: 0.5rem; }
+    }
+    @media (orientation: landscape) and (max-height: 520px) and (max-width: 1023px) {
+      .chart-wrap { height: calc(100vh - 150px); height: calc(100dvh - 150px); min-height: 240px; }
+    }
+    @media (pointer: coarse) {
+      button, select, summary { min-height: 36px; }
+      input:not([type=checkbox]):not([type=color]), select, textarea { font-size: 16px; }
+      input[type=checkbox] { width: 20px; height: 20px; }
+      #drawToolbar button, #drawToolbar select { padding: 6px 12px; font-size: 13px; }
+      #drawToolbar input[type=color] { width: 40px !important; height: 34px !important; }
+      #wlTableBody td { padding-top: 10px; padding-bottom: 10px; }
+      #wlTableBody button[data-remove] { min-width: 36px; }
+    }
+  </style>
+</head>
+<body class="p-3 md:p-6 flex flex-col gap-4 min-h-screen">
+
+  <!-- HEADER -->
+  <header id="appHeader" class="flex flex-col md:flex-row items-start md:items-center justify-between pb-3 border-b border-gray-800 gap-2">
+    <div>
+      <h1 class="text-xl font-bold text-white flex items-center gap-2">
+        <i data-lucide="line-chart" class="text-green-400 w-5 h-5"></i>
+        Alpaca AVWAP & True EMA Cloud Strategy Tester
+      </h1>
+      <p class="text-xs text-gray-400 hdr-sub">Direct Alpaca Market Data v2 API • Canvas Floating Ribbon • Trend-Colored AVWAP • Custom Watchlists • Local Candle Cache</p>
+    </div>
+    <div id="statusBadge" class="text-xs px-3 py-1.5 rounded-full border border-gray-700 bg-gray-800 text-gray-300 flex items-center gap-2">
+      <span class="w-2.5 h-2.5 rounded-full bg-gray-500"></span> Ready
+    </div>
+  </header>
+
+  <!-- CONTROLS & API CONFIG -->
+  <details id="cfgDetails" class="chart-box rounded-lg p-3 cfg">
+  <summary>⚙ API keys · symbol · strategy parameters</summary>
+  <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 mt-3">
+    <!-- Alpaca Credentials -->
+    <div class="chart-box p-3.5 rounded-lg flex flex-col gap-2.5">
+      <div class="text-xs font-semibold text-gray-200 flex items-center justify-between">
+        <span>ALPACA API CREDENTIALS</span>
+        <i data-lucide="key" class="w-3.5 h-3.5 text-blue-400"></i>
+      </div>
+      <div>
+        <label class="text-[11px] text-gray-400 block mb-1">API Key ID</label>
+        <input type="password" id="alpacaKey" class="w-full px-2 py-1 rounded" placeholder="PK...">
+      </div>
+      <div>
+        <label class="text-[11px] text-gray-400 block mb-1">Secret Key</label>
+        <input type="password" id="alpacaSecret" class="w-full px-2 py-1 rounded" placeholder="Secret...">
+      </div>
+      <div class="flex items-center justify-between pt-1">
+        <label class="text-[11px] text-gray-400">Data Feed</label>
+        <select id="feedType" class="px-2 py-0.5 rounded text-xs">
+          <option value="iex" selected>IEX (Free Tier)</option>
+          <option value="sip">SIP (Pro Tier)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Ticker & Fetch Range -->
+    <div class="chart-box p-3.5 rounded-lg flex flex-col gap-2.5">
+      <div class="text-xs font-semibold text-gray-200 flex items-center justify-between">
+        <span>DATA & SYMBOL</span>
+        <i data-lucide="database" class="w-3.5 h-3.5 text-green-400"></i>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-[11px] text-gray-400 block mb-1">Symbol</label>
+          <input type="text" id="symbolInput" class="w-full px-2 py-1 rounded font-semibold uppercase" value="NVDA">
+        </div>
+        <div>
+          <label class="text-[11px] text-gray-400 block mb-1">Timeframe</label>
+          <select id="timeframeSelect" class="hidden"><option value="1Day" selected>Daily (1D)</option></select>
+          <div class="w-full px-2 py-1 rounded text-sm bg-gray-800 border border-gray-700 text-gray-300">Daily (1D)</div>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-[11px] text-gray-400 block mb-1">Bars Lookback</label>
+          <input type="number" id="barsCount" class="w-full px-2 py-1 rounded" value="500" min="50" max="2000">
+        </div>
+        <div class="flex items-end">
+          <button id="fetchBtn" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-semibold py-1 px-3 rounded text-xs flex items-center justify-center gap-1.5 transition">
+            <i data-lucide="download-cloud" class="w-4 h-4"></i> Fetch Alpaca
+          </button>
+        </div>
+      </div>
+      <div class="flex items-center justify-between text-[11px] text-gray-400 pt-1">
+        <label for="autoRefreshToggle" class="flex items-center gap-2">
+          <input id="autoRefreshToggle" type="checkbox" class="accent-blue-500">
+          Auto-refresh
+        </label>
+        <span id="lastUpdatedLabel">Not updated yet</span>
+      </div>
+      <button id="demoBtn" class="w-full bg-gray-700 hover:bg-gray-600 text-gray-200 py-1 px-2 rounded text-[11px] flex items-center justify-center gap-1 transition">
+        <i data-lucide="sparkles" class="w-3.5 h-3.5 text-yellow-400"></i> Test With Sample Data
+      </button>
+    </div>
+
+    <!-- Strategy Parameters -->
+    <div class="chart-box p-3.5 rounded-lg flex flex-col gap-2.5 lg:col-span-2">
+      <div class="text-xs font-semibold text-gray-200 flex items-center justify-between">
+        <span>STRATEGY PARAMETERS</span>
+        <i data-lucide="sliders" class="w-3.5 h-3.5 text-yellow-400"></i>
+      </div>
+      <div class="grid grid-cols-4 gap-2">
+        <div>
+          <label class="text-[11px] text-gray-400 block mb-1">AVWAP Anchor</label>
+          <input type="number" id="paramAnchor" class="w-full px-2 py-1 rounded" value="120">
+        </div>
+        <div>
+          <label class="text-[11px] text-gray-400 block mb-1">Fast EMA</label>
+          <input type="number" id="paramFast" class="w-full px-2 py-1 rounded" value="10">
+        </div>
+        <div>
+          <label class="text-[11px] text-gray-400 block mb-1">Slow EMA</label>
+          <input type="number" id="paramSlow" class="w-full px-2 py-1 rounded" value="21">
+        </div>
+        <div>
+          <label class="text-[11px] text-gray-400 block mb-1">Cloud ATR Mult</label>
+          <input type="number" id="paramCloudMult" class="w-full px-2 py-1 rounded" value="0.3" step="0.1">
+        </div>
+      </div>
+      <div class="grid grid-cols-4 gap-2">
+        <div>
+          <label class="text-[11px] text-gray-400 block mb-1">ATR Length</label>
+          <input type="number" id="paramAtrLen" class="w-full px-2 py-1 rounded" value="14">
+        </div>
+        <div>
+          <label class="text-[11px] text-gray-400 block mb-1">Stop Loss (ATR)</label>
+          <input type="number" id="paramSL" class="w-full px-2 py-1 rounded" value="2.0" step="0.5">
+        </div>
+        <div>
+          <label class="text-[11px] text-gray-400 block mb-1">Take Profit (ATR)</label>
+          <input type="number" id="paramTP" class="w-full px-2 py-1 rounded" value="3.5" step="0.5">
+        </div>
+        <div class="flex items-end">
+          <button id="runBacktestBtn" class="w-full bg-green-600 hover:bg-green-500 text-white font-semibold py-1 px-3 rounded text-xs flex items-center justify-center gap-1.5 transition">
+            <i data-lucide="play" class="w-4 h-4"></i> Run Strategy
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+  </details>
+
+  <!-- WATCHLIST & LOCAL CANDLE CACHE -->
+  <div id="wlSection" class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <!-- Watchlist editor + cache tools -->
+    <details id="wlEditDetails" class="chart-box p-3 rounded-lg cfg">
+    <summary>✎ Edit watchlists &amp; local candle cache</summary>
+    <div class="flex flex-col gap-2.5 pt-2.5">
+      <div class="text-xs font-semibold text-gray-200 flex items-center justify-between">
+        <span>CUSTOM WATCHLIST</span>
+        <i data-lucide="list" class="w-3.5 h-3.5 text-purple-400"></i>
+      </div>
+      <div class="flex gap-2">
+        <select id="wlSelect" class="flex-1 px-2 py-1 rounded text-xs"></select>
+        <button id="wlNewBtn" class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-2 py-1 rounded text-xs">New</button>
+        <button id="wlDeleteBtn" class="bg-gray-700 hover:bg-red-700 text-gray-200 px-2 py-1 rounded text-xs">Delete</button>
+      </div>
+      <textarea id="wlText" rows="4" spellcheck="false" class="w-full px-2 py-1 rounded font-semibold uppercase scroll-dark"
+        placeholder="AAPL, MSFT, NVDA&#10;Commas, spaces or new lines"></textarea>
+      <div class="flex gap-2">
+        <button id="wlApplyBtn" class="flex-1 bg-purple-600 hover:bg-purple-500 text-white font-semibold py-1 px-2 rounded text-xs">Save List</button>
+        <button id="wlAddCurrentBtn" class="flex-1 bg-gray-700 hover:bg-gray-600 text-gray-200 py-1 px-2 rounded text-xs">+ Add current symbol</button>
+      </div>
+
+      <div class="border-t border-gray-800 pt-2.5 mt-0.5 flex flex-col gap-2">
+        <div class="text-xs font-semibold text-gray-200 flex items-center justify-between">
+          <span>LOCAL CANDLE CACHE</span>
+          <i data-lucide="hard-drive" class="w-3.5 h-3.5 text-green-400"></i>
+        </div>
+        <div id="cacheStats" class="text-xs text-gray-400">Reading cache…</div>
+        <label class="flex items-center gap-2 text-xs text-gray-400" for="cacheOnly">
+          <input id="cacheOnly" type="checkbox" class="accent-blue-500"> Cache only (never call Alpaca)
+        </label>
+        <label class="flex items-center gap-2 text-xs text-gray-400" for="forceFull">
+          <input id="forceFull" type="checkbox" class="accent-blue-500"> Force full re-download
+        </label>
+        <div class="grid grid-cols-3 gap-2">
+          <button id="cacheExportBtn" class="bg-gray-700 hover:bg-gray-600 text-gray-200 py-1 px-2 rounded text-xs">Export</button>
+          <button id="cacheImportBtn" class="bg-gray-700 hover:bg-gray-600 text-gray-200 py-1 px-2 rounded text-xs">Import</button>
+          <button id="cacheClearBtn" class="bg-gray-700 hover:bg-red-700 text-gray-200 py-1 px-2 rounded text-xs">Clear</button>
+        </div>
+        <input id="cacheImportFile" type="file" accept=".json,application/json" class="hidden">
+      </div>
+    </div>
+    </details>
+
+    <!-- Watchlist table -->
+    <div class="chart-box p-3.5 rounded-lg lg:col-span-2 flex flex-col gap-2 order-first lg:order-none">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <span class="text-xs font-semibold text-gray-200">WATCHLIST <span id="wlCount" class="text-gray-500 font-normal"></span></span>
+        <div class="flex items-center gap-3 flex-wrap">
+          <span id="wlProgress" class="text-xs text-gray-400"></span>
+          <label class="flex items-center gap-1.5 text-xs text-gray-400" for="wlBullOnly">
+            <input id="wlBullOnly" type="checkbox" class="accent-green-500"> Bullish only
+          </label>
+          <button id="wlUpdateAllBtn" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold py-1 px-3 rounded text-xs flex items-center gap-1.5">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> <span id="wlUpdateAllLabel">Update All</span>
+          </button>
+        </div>
+      </div>
+      <div id="wlTableWrap" tabindex="0" class="overflow-x-auto scroll-dark max-h-64 overflow-y-auto" style="outline:none">
+        <table class="w-full text-left text-xs">
+          <thead class="text-gray-400 bg-gray-900 sticky top-0 border-b border-gray-800">
+            <tr>
+              <th class="p-2">Symbol</th>
+              <th class="p-2 hm">Cached Bars</th>
+              <th class="p-2 hm">Last Bar</th>
+              <th class="p-2">Close</th>
+              <th class="p-2">vs AVWAP</th>
+              <th class="p-2">State</th>
+              <th class="p-2"></th>
+            </tr>
+          </thead>
+          <tbody id="wlTableBody" class="divide-y divide-gray-800 text-gray-300"></tbody>
+        </table>
+      </div>
+      <div class="text-xs text-gray-500">Click a symbol to load it (cached candles load instantly). Focus the list and use ↑ / ↓ to step through. State uses the current strategy parameters and the timeframe/feed selected above.</div>
+    </div>
+  </div>
+
+  <!-- METRICS SUMMARY BANNER -->
+  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+    <div class="chart-box p-3 rounded-lg">
+      <div class="text-[11px] text-gray-400">Total Trades</div>
+      <div id="metricTrades" class="text-lg font-bold text-gray-200">0</div>
+    </div>
+    <div class="chart-box p-3 rounded-lg">
+      <div class="text-[11px] text-gray-400">Win Rate</div>
+      <div id="metricWinRate" class="text-lg font-bold text-gray-200">0.0%</div>
+    </div>
+    <div class="chart-box p-3 rounded-lg">
+      <div class="text-[11px] text-gray-400">Total Return</div>
+      <div id="metricReturn" class="text-lg font-bold text-gray-200">0.0%</div>
+    </div>
+    <div class="chart-box p-3 rounded-lg">
+      <div class="text-[11px] text-gray-400">Profit Factor</div>
+      <div id="metricPF" class="text-lg font-bold text-gray-200">0.00</div>
+    </div>
+    <div class="chart-box p-3 rounded-lg">
+      <div class="text-[11px] text-gray-400">Max Drawdown</div>
+      <div id="metricDD" class="text-lg font-bold text-gray-200">0.0%</div>
+    </div>
+    <div class="chart-box p-3 rounded-lg">
+      <div class="text-[11px] text-gray-400">Confluence Status</div>
+      <div id="metricConfluence" class="text-xs font-semibold text-gray-400 mt-1">Neutral</div>
+    </div>
+  </div>
+
+  <!-- MAIN CHART WRAPPER WITH CANVAS OVERLAY -->
+  <div id="chartSection" class="chart-box p-2.5 rounded-lg flex flex-col gap-2">
+    <div class="text-xs font-semibold px-2 pt-1 flex flex-wrap gap-2 justify-between text-gray-300">
+      <div class="flex items-center gap-4 flex-wrap">
+        <span>PRICE & CONFLUENCE</span>
+        <span class="text-[11px] flex items-center gap-1.5 legend">
+          <span class="w-2.5 h-2.5 rounded-full bg-[#10b981]"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-[#ef4444]"></span>
+          <span>AVWAP (Trend-Colored)</span>
+        </span>
+        <span class="text-[11px] flex items-center gap-1.5 legend">
+          <span class="w-3.5 h-2 rounded bg-green-500/50 border border-green-400"></span> Bullish Cloud
+        </span>
+        <span class="text-[11px] flex items-center gap-1.5 legend">
+          <span class="w-3.5 h-2 rounded bg-red-500/50 border border-red-400"></span> Bearish Cloud
+        </span>
+        <span class="text-[11px] flex items-center gap-1.5 legend">
+          <span class="w-3.5 h-2 rounded bg-gray-500/50 border border-gray-400"></span> Neutral (Compressed)
+        </span>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <button id="playPrevBtn" title="Previous symbol in watchlist" class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-2 py-0.5 rounded text-xs">◀</button>
+        <button id="playToggleBtn" title="Auto-cycle through the watchlist (Space)" class="bg-green-600 hover:bg-green-500 text-white font-semibold px-3 py-0.5 rounded text-xs" style="min-width:76px">▶ Play</button>
+        <button id="playNextBtn" title="Next symbol in watchlist" class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-2 py-0.5 rounded text-xs">▶</button>
+        <select id="playSpeed" title="Seconds per symbol" class="px-1 py-0.5 rounded text-xs">
+          <option value="2">2s</option>
+          <option value="3" selected>3s</option>
+          <option value="5">5s</option>
+          <option value="10">10s</option>
+        </select>
+        <span id="chartSymbolTimeframe" class="text-gray-400 text-[11px] uppercase">No Data Loaded</span>
+      </div>
+    </div>
+
+    <!-- Drawing toolbar -->
+    <div id="drawToolbar" class="flex items-center gap-1.5 flex-wrap px-2 pb-1">
+      <button data-tool="cursor" title="Select / move / edit drawings (Esc)" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">↖ Cursor</button>
+      <button data-tool="trend" title="Trend line (drag, or click twice)" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">╱ Trend</button>
+      <button data-tool="ray" title="Ray: extends to the right" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">↗ Ray</button>
+      <button data-tool="hline" title="Horizontal line (click)" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">─ H-Line</button>
+      <button data-tool="vline" title="Vertical line (click)" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">│ V-Line</button>
+      <button data-tool="rect" title="Rectangle (drag)" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">▭ Rect</button>
+      <button data-tool="fib" title="Fib retracement (drag from swing start to end)" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">Fib</button>
+      <button data-tool="channel" title="Parallel channel: drag the base line, then click for the width" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">▤ Channel</button>
+      <button data-tool="measure" title="Measure price %, bars and time (drag)" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">↕ Measure</button>
+      <button data-tool="rrlong" title="Long position R/R box: click at entry, then drag the handles for stop / target / width" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">▲ R/R Long</button>
+      <button data-tool="rrshort" title="Short position R/R box: click at entry, then drag the handles for stop / target / width" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">▼ R/R Short</button>
+      <button data-tool="text" title="Text label (click; double-click a label to edit)" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">T Text</button>
+      <span class="text-gray-700">|</span>
+      <input id="drawColor" type="color" value="#f59e0b" title="Color" class="p-0 rounded" style="width:26px;height:22px">
+      <select id="drawWidth" title="Line width" class="px-1 py-0.5 rounded text-xs">
+        <option value="1">1px</option><option value="2" selected>2px</option><option value="3">3px</option><option value="4">4px</option>
+      </select>
+      <select id="drawDash" title="Line style" class="px-1 py-0.5 rounded text-xs">
+        <option value="0" selected>Solid</option><option value="1">Dashed</option>
+      </select>
+      <label class="flex items-center gap-1 text-xs text-gray-400" title="Snap points to candle open/high/low/close"><input id="drawMagnet" type="checkbox" class="accent-blue-500" checked> Magnet</label>
+      <label class="flex items-center gap-1 text-xs text-gray-400" title="Keep the tool active after each drawing"><input id="drawStay" type="checkbox" class="accent-blue-500"> Stay</label>
+      <button id="drawUndoBtn" title="Undo (Ctrl+Z)" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">Undo</button>
+      <button id="drawDeleteBtn" title="Delete selected (Del)" class="bg-gray-700 text-gray-200 hover:bg-red-700 px-2 py-0.5 rounded text-xs">Delete</button>
+      <button id="drawClearBtn" title="Remove all drawings on this chart" class="bg-gray-700 text-gray-200 hover:bg-red-700 px-2 py-0.5 rounded text-xs">Clear</button>
+      <button id="drawVisibleBtn" title="Hide / show drawings" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">Hide</button>
+      <button id="drawSaveBtn" title="Save this chart's drawings as a JSON file" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">Save JSON</button>
+      <button id="drawSaveAllBtn" title="Save drawings for every symbol / timeframe as one JSON file" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">Save All</button>
+      <button id="drawLoadBtn" title="Import drawings from a JSON file (merged with existing)" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">Load JSON</button>
+      <input id="drawLoadFile" type="file" accept=".json,application/json" class="hidden">
+      <span class="text-gray-700">|</span>
+      <label class="flex items-center gap-1 text-xs text-gray-400" title="Always fit the right price axis to the visible candles, AVWAP and cloud"><input id="autoFitPrice" type="checkbox" class="accent-blue-500" checked> Auto-fit price</label>
+      <label class="flex items-center gap-1 text-xs text-gray-400" title="Empty bars kept to the right of the last candle">Right space
+        <input id="rightSpace" type="number" min="0" max="200" value="12" class="px-1 py-0.5 rounded text-xs" style="width:52px">
+      </label>
+      <button id="exportPngBtn" title="Download chart as PNG (with cloud, AVWAP and drawings)" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-2.5 py-0.5 rounded text-xs">📷 PNG</button>
+      <button id="copyPngBtn" title="Copy chart image to clipboard" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">Copy</button>
+    </div>
+
+    <!-- Chart container with transparent Canvas Overlay -->
+    <div class="relative w-full chart-wrap" id="chartContainer">
+      <div id="mainChart" class="w-full h-full"></div>
+      <canvas id="cloudOverlayCanvas"></canvas>
+      <canvas id="drawCanvas"></canvas>
+    </div>
+  </div>
+
+  <!-- TRADE LOG -->
+  <div class="chart-box p-3 rounded-lg flex flex-col gap-2">
+    <div class="flex items-center justify-between">
+      <span class="text-xs font-semibold text-gray-300">STRATEGY TRADE LOG</span>
+      <button id="exportCsvBtn" class="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1">
+        <i data-lucide="download" class="w-3.5 h-3.5"></i> Export CSV
+      </button>
+    </div>
+    <div class="overflow-x-auto scroll-dark max-h-64">
+      <table class="w-full text-left text-xs">
+        <thead class="text-gray-400 bg-gray-900 sticky top-0 border-b border-gray-800">
+          <tr>
+            <th class="p-2">#</th>
+            <th class="p-2">Entry Date</th>
+            <th class="p-2">Entry Price</th>
+            <th class="p-2">Exit Date</th>
+            <th class="p-2">Exit Price</th>
+            <th class="p-2">Exit Reason</th>
+            <th class="p-2">P&L (%)</th>
+          </tr>
+        </thead>
+        <tbody id="tradeTableBody" class="divide-y divide-gray-800 text-gray-300">
+          <tr><td colspan="7" class="p-3 text-center text-gray-500">No trades executed yet. Fetch data or click "Test With Sample Data".</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Mobile quick-nav bar -->
+  <div id="mobileBar">
+    <button id="mobPrev" aria-label="Previous symbol">◀</button>
+    <div id="mobSym">—</div>
+    <button id="mobNext" aria-label="Next symbol">▶</button>
+    <button id="mobPlay" aria-label="Play / pause">▶ Play</button>
+  </div>
+
+  <script>
+    // Icons are cosmetic: never let a failed CDN load break the app
+    function safeIcons() { try { if (window.lucide && lucide.createIcons) lucide.createIcons(); } catch (e) {} }
+    safeIcons();
+
+    let rawBars = [];
+    let mainChartInstance = null;
+    let candleSeries = null;
+    let computedAvwapPoints = [];
+    let computedRibbonPoints = [];
+    let autoRefreshTimer = null;
+    let lastSuccessfulFetch = null;
+
+    // Local Storage for Keys
+    const keyInput = document.getElementById('alpacaKey');
+    const secretInput = document.getElementById('alpacaSecret');
+    keyInput.value = localStorage.getItem('alpaca_key') || '';
+    secretInput.value = localStorage.getItem('alpaca_secret') || '';
+
+    keyInput.addEventListener('change', () => localStorage.setItem('alpaca_key', keyInput.value.trim()));
+    secretInput.addEventListener('change', () => localStorage.setItem('alpaca_secret', secretInput.value.trim()));
+
+    function setStatus(text, type = 'slate') {
+      const badge = document.getElementById('statusBadge');
+      const colors = {
+        slate: 'border-gray-700 bg-gray-800 text-gray-300',
+        green: 'border-green-700 bg-green-950 text-green-400',
+        amber: 'border-yellow-700 bg-yellow-950 text-yellow-400',
+        red: 'border-red-700 bg-red-950 text-red-400'
+      };
+      badge.className = `text-xs px-3 py-1.5 rounded-full border flex items-center gap-2 ${colors[type] || colors.slate}`;
+      badge.innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-current"></span> ${text}`;
+    }
+
+    // Chart Initialization
+    function initCharts() {
+      const mainEl = document.getElementById('mainChart');
+      if (!mainEl) return;
+      mainEl.innerHTML = '';
+
+      const chartOptions = {
+        layout: { background: { color: '#0f172a' }, textColor: '#94a3b8' },
+        grid: { vertLines: { color: '#1e293b' }, horzLines: { color: '#1e293b' } },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+        rightPriceScale: {
+          autoScale: true,
+          borderColor: '#334155',
+          scaleMargins: { top: 0.08, bottom: 0.08 }
+        },
+        handleScale: { axisPressedMouseMove: { time: true, price: !autoFitOn() } },
+        timeScale: {
+          borderColor: '#334155',
+          timeVisible: true,
+          secondsVisible: false,
+          rightOffset: rightSpaceVal()
+        }
+      };
+
+      const createCandle = (chart, opts) => typeof chart.addCandlestickSeries === 'function'
+        ? chart.addCandlestickSeries(opts)
+        : chart.addSeries(LightweightCharts.CandlestickSeries, opts);
+
+      const createLine = (chart, opts) => typeof chart.addLineSeries === 'function'
+        ? chart.addLineSeries(opts)
+        : chart.addSeries(LightweightCharts.LineSeries, opts);
+
+      mainChartInstance = LightweightCharts.createChart(mainEl, { ...chartOptions, height: mainEl.clientHeight || 520 });
+
+      // Candlestick series
+      candleSeries = createCandle(mainChartInstance, {
+        upColor: '#22c55e', downColor: '#ef4444',
+        borderUpColor: '#22c55e', borderDownColor: '#ef4444',
+        wickUpColor: '#22c55e', wickDownColor: '#ef4444',
+        // Fit the right axis to the visible candles AND the AVWAP line + EMA cloud,
+        // which are drawn on a canvas overlay and would otherwise be ignored by autoscale.
+        autoscaleInfoProvider: original => {
+          const res = original();
+          if (!res || !res.priceRange) return res;
+          try {
+            const r = mainChartInstance.timeScale().getVisibleLogicalRange();
+            if (!r || !rawBars.length) return res;
+            const i0 = Math.max(0, Math.floor(r.from)), i1 = Math.min(rawBars.length - 1, Math.ceil(r.to));
+            if (i1 < i0) return res;
+            const t0 = rawBars[i0].time, t1 = rawBars[i1].time;
+            let lo = res.priceRange.minValue, hi = res.priceRange.maxValue;
+            for (const p of computedAvwapPoints) {
+              if (p.time < t0 || p.time > t1) continue;
+              if (p.value < lo) lo = p.value; if (p.value > hi) hi = p.value;
+            }
+            for (const p of computedRibbonPoints) {
+              if (p.time < t0 || p.time > t1) continue;
+              lo = Math.min(lo, p.fast, p.slow); hi = Math.max(hi, p.fast, p.slow);
+            }
+            res.priceRange = { minValue: lo, maxValue: hi };
+          } catch (e) {}
+          return res;
+        }
+      });
+
+
+      // Synchronize Canvas Overlay on scroll/zoom
+      mainChartInstance.timeScale().subscribeVisibleLogicalRangeChange(() => {
+        applyAutoFit();
+        requestAnimationFrame(renderCloudOverlay);
+      });
+
+      window.addEventListener('resize', () => {
+        if (mainChartInstance) {
+          mainChartInstance.applyOptions({ width: mainEl.clientWidth, height: mainEl.clientHeight || 520 });
+          resizeCanvas();
+          renderCloudOverlay();
+        }
+      });
+
+      resizeCanvas();
+    }
+
+    // ---- Auto-fit right price axis ----
+    function autoFitOn() {
+      const el = document.getElementById('autoFitPrice');
+      return el ? el.checked : true;
+    }
+    // Keeps the right axis fitted to what is visible: re-enables autoscale if anything switched it off
+    // (e.g. dragging the axis) and locks manual axis-dragging while Auto-fit is on.
+    function applyAutoFit() {
+      if (!mainChartInstance) return;
+      const on = autoFitOn();
+      try {
+        mainChartInstance.applyOptions({ handleScale: { axisPressedMouseMove: { time: true, price: !on } } });
+        if (on) mainChartInstance.priceScale('right').applyOptions({ autoScale: true });
+      } catch (e) {}
+    }
+
+    function resizeCanvas() {
+      const container = document.getElementById('chartContainer');
+      const canvas = document.getElementById('cloudOverlayCanvas');
+      if (!container || !canvas) return;
+
+      const rect = container.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
+
+      const ctx = canvas.getContext('2d');
+      ctx.scale(dpr, dpr);
+      resizeDrawCanvas();
+    }
+
+    // Custom Cloud Ribbon Drawer (Fills exclusively BETWEEN Fast EMA and Slow EMA)
+    function renderCloudOverlay() {
+      const canvas = document.getElementById('cloudOverlayCanvas');
+      if (!canvas || !candleSeries || !mainChartInstance || computedRibbonPoints.length === 0) return;
+
+      const ctx = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+
+      const timeScale = mainChartInstance.timeScale();
+
+      // Draw AVWAP as a single segmented path on the overlay, avoiding two
+      // overlapping full-length line series.
+      ctx.lineWidth = 3;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+      for (let i = 0; i < computedAvwapPoints.length - 1; i++) {
+        const a = computedAvwapPoints[i];
+        const b = computedAvwapPoints[i + 1];
+        const x1 = timeScale.timeToCoordinate(a.time);
+        const x2 = timeScale.timeToCoordinate(b.time);
+        const y1 = candleSeries.priceToCoordinate(a.value);
+        const y2 = candleSeries.priceToCoordinate(b.value);
+        if (x1 === null || x2 === null || y1 === null || y2 === null) continue;
+        ctx.beginPath();
+        ctx.strokeStyle = b.isBullish ? '#10b981' : '#ef4444';
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+
+      for (let i = 0; i < computedRibbonPoints.length - 1; i++) {
+        const p1 = computedRibbonPoints[i];
+        const p2 = computedRibbonPoints[i + 1];
+
+        const x1 = timeScale.timeToCoordinate(p1.time);
+        const x2 = timeScale.timeToCoordinate(p2.time);
+
+        if (x1 === null || x2 === null || Math.max(x1, x2) < 0 || Math.min(x1, x2) > (canvas.width / dpr)) {
+          continue;
+        }
+
+        const y1Fast = candleSeries.priceToCoordinate(p1.fast);
+        const y1Slow = candleSeries.priceToCoordinate(p1.slow);
+        const y2Fast = candleSeries.priceToCoordinate(p2.fast);
+        const y2Slow = candleSeries.priceToCoordinate(p2.slow);
+
+        if (y1Fast === null || y1Slow === null || y2Fast === null || y2Slow === null) {
+          continue;
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(x1, y1Fast);
+        ctx.lineTo(x2, y2Fast);
+        ctx.lineTo(x2, y2Slow);
+        ctx.lineTo(x1, y1Slow);
+        ctx.closePath();
+
+        if (p2.isBullish) {
+          ctx.fillStyle = 'rgba(16, 185, 129, 0.55)'; // Bullish emerald cloud
+        } else if (p2.isBearish) {
+          ctx.fillStyle = 'rgba(239, 68, 68, 0.50)';  // Bearish rose cloud
+        } else {
+          ctx.fillStyle = 'rgba(148, 163, 184, 0.35)'; // Neutral / compressed gray cloud
+        }
+        ctx.fill();
+      }
+    }
+
+    // Indicators
+    function calculateEMA(values, period) {
+      const ema = new Array(values.length).fill(NaN);
+      if (values.length === 0 || period <= 0) return ema;
+      const k = 2 / (period + 1);
+
+      let sum = 0;
+      const initialCount = Math.min(period, values.length);
+      for (let i = 0; i < initialCount; i++) sum += values[i];
+      let prev = sum / initialCount;
+      ema[initialCount - 1] = prev;
+
+      for (let i = initialCount; i < values.length; i++) {
+        prev = values[i] * k + prev * (1 - k);
+        ema[i] = prev;
+      }
+      return ema;
+    }
+
+    function calculateATR(bars, period = 14) {
+      const tr = [];
+      for (let i = 0; i < bars.length; i++) {
+        if (i === 0) {
+          tr.push(bars[i].h - bars[i].l);
+        } else {
+          const hl = bars[i].h - bars[i].l;
+          const hc = Math.abs(bars[i].h - bars[i - 1].c);
+          const lc = Math.abs(bars[i].l - bars[i - 1].c);
+          tr.push(Math.max(hl, hc, lc));
+        }
+      }
+      return calculateEMA(tr, period);
+    }
+
+    // Sample Data Generator (Instant testing without Alpaca keys)
+    function generateSampleBars(symbol, count = 300) {
+      const bars = [];
+      let price = 5.80;
+      const now = Math.floor(Date.now() / 1000);
+      const step = 86400; // 1 day
+      let t = now - (count * step);
+
+      for (let i = 0; i < count; i++) {
+        t += step;
+        const trend = i > 120 ? (i > 220 ? -0.003 : 0.005) : 0.001;
+        const change = (Math.random() - 0.48 + trend) * (price * 0.035);
+        const open = price;
+        const close = Math.max(1.0, open + change);
+        const high = Math.max(open, close) + (Math.random() * price * 0.02);
+        const low = Math.min(open, close) - (Math.random() * price * 0.02);
+        const volume = Math.floor(500000 + Math.random() * 2000000);
+        price = close;
+
+        bars.push({ time: t, o: open, h: high, l: low, c: close, v: volume });
+      }
+      return bars;
+    }
+
+    document.getElementById('demoBtn').addEventListener('click', () => {
+      const symbol = document.getElementById('symbolInput').value.trim().toUpperCase() || 'RUM';
+      setStatus('Loaded Demo Sample Data', 'green');
+      loadDrawingsFor('DEMO-' + symbol, '1Day');
+      updateWatermark(symbol, '1Day');
+      rawBars = generateSampleBars(symbol, 400);
+      document.getElementById('chartSymbolTimeframe').innerText = `${symbol} - Demo Simulated (${rawBars.length} Bars)`;
+      if (!candleSeries) initCharts();
+      runStrategyAndRender();
+    });
+
+    // =====================================================================
+    // Local candle cache (IndexedDB — far larger than localStorage, survives reloads)
+    // One record per symbol + timeframe + feed.
+    // =====================================================================
+    const $ = id => document.getElementById(id);
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const DB_NAME = 'alpaca_candle_cache';
+    const DB_STORE = 'series';
+    const MAX_STORED_BARS = 20000;
+    let dbPromise = null;
+    let busy = false;
+    let loadToken = 0;
+    let rowsToken = 0;
+    let rowInfo = new Map();
+
+    function cacheKey(symbol, timeframe, feed) {
+      return `${symbol}|${timeframe}|${feed}`;
+    }
+
+    function openDB() {
+      if (dbPromise) return dbPromise;
+      dbPromise = new Promise((resolve, reject) => {
+        if (!window.indexedDB) return reject(new Error('IndexedDB is not available in this browser'));
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = () => req.result.createObjectStore(DB_STORE, { keyPath: 'key' });
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      return dbPromise;
+    }
+
+    async function cacheGet(symbol, timeframe, feed) {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const r = db.transaction(DB_STORE).objectStore(DB_STORE).get(cacheKey(symbol, timeframe, feed));
+        r.onsuccess = () => resolve(r.result || null);
+        r.onerror = () => reject(r.error);
+      });
+    }
+
+    async function cachePut(rec) {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, 'readwrite');
+        tx.objectStore(DB_STORE).put(rec);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error || new Error('Cache write aborted'));
+      });
+    }
+
+    async function cacheListAll() {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const r = db.transaction(DB_STORE).objectStore(DB_STORE).getAll();
+        r.onsuccess = () => resolve(r.result || []);
+        r.onerror = () => reject(r.error);
+      });
+    }
+
+    async function cacheClearAll() {
+      const db = await openDB();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, 'readwrite');
+        tx.objectStore(DB_STORE).clear();
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    }
+
+    // Move any bars saved by the older single-symbol localStorage cache into IndexedDB.
+    async function migrateLegacyCache() {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith('alpaca_bars_v2:')) keys.push(k);
+      }
+      for (const k of keys) {
+        try {
+          const [, symbol, timeframe, feed] = k.split(':');
+          const c = JSON.parse(localStorage.getItem(k));
+          if (symbol && timeframe && feed && c && Array.isArray(c.bars) && c.bars.length) {
+            const existing = await cacheGet(symbol, timeframe, feed);
+            if (!existing) {
+              await cachePut({
+                key: cacheKey(symbol, timeframe, feed), symbol, timeframe, feed,
+                savedAt: c.savedAt || new Date().toISOString(), fullHistory: false, bars: c.bars
+              });
+            }
+          }
+          localStorage.removeItem(k);
+        } catch (e) { /* leave the legacy entry in place if IndexedDB is unavailable */ }
+      }
+    }
+
+    async function refreshCacheStats() {
+      try {
+        const recs = await cacheListAll();
+        const bars = recs.reduce((s, r) => s + r.bars.length, 0);
+        const mb = (bars * 60) / 1048576;
+        $('cacheStats').textContent =
+          `${recs.length} series • ${bars.toLocaleString()} bars • ~${mb < 0.1 ? '<0.1' : mb.toFixed(1)} MB`;
+      } catch (e) {
+        $('cacheStats').textContent = 'Local cache unavailable (IndexedDB blocked in this browser mode)';
+      }
+    }
+
+    // =====================================================================
+    // Alpaca download helpers (incremental updates reuse cached candles)
+    // =====================================================================
+    function cacheOnly() { return $('cacheOnly').checked; }
+    function hasCreds() { return !!(keyInput.value.trim() && secretInput.value.trim()); }
+
+    async function alpacaGet(url, attempt = 0) {
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'APCA-API-KEY-ID': keyInput.value.trim(),
+          'APCA-API-SECRET-KEY': secretInput.value.trim(),
+          'Accept': 'application/json'
+        }
+      });
+      if (res.status === 429 && attempt < 3) {          // rate limited: back off and retry
+        await sleep(1500 * (attempt + 1));
+        return alpacaGet(url, attempt + 1);
+      }
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try { const j = await res.json(); msg = j.message || j.error || msg; } catch (e) {}
+        const err = new Error(msg);
+        err.status = res.status;
+        throw err;
+      }
+      return res.json();
+    }
+
+    async function fetchAllPages(url, maxBars) {
+      let data = await alpacaGet(url);
+      const all = Array.isArray(data.bars) ? [...data.bars] : [];
+      let token = data.next_page_token;
+      while (token && all.length < maxBars) {
+        data = await alpacaGet(`${url}&page_token=${encodeURIComponent(token)}`);
+        all.push(...(data.bars || []));
+        token = data.next_page_token;
+      }
+      return all;
+    }
+
+    function normalizeBars(arr) {
+      const m = new Map();
+      arr.forEach(b => {
+        const t = Math.floor(new Date(b.t).getTime() / 1000);
+        m.set(t, { time: t, o: b.o, h: b.h, l: b.l, c: b.c, v: b.v });
+      });
+      return Array.from(m.values()).sort((a, b) => a.time - b.time);
+    }
+
+    function barsUrl(symbol, timeframe, feed, startISO, limit, sort) {
+      return `https://data.alpaca.markets/v2/stocks/${encodeURIComponent(symbol)}/bars` +
+        `?timeframe=${encodeURIComponent(timeframe)}&start=${encodeURIComponent(startISO)}` +
+        `&end=${encodeURIComponent(new Date().toISOString())}&limit=${limit}` +
+        `&feed=${encodeURIComponent(feed)}&adjustment=split&sort=${sort}`;
+    }
+
+    async function downloadFull(symbol, timeframe, feed, limit) {
+      let daysBack = 365;
+      if (timeframe === '1Day') daysBack = Math.ceil(limit * 1.6) + 30;
+      else if (timeframe === '1Hour') daysBack = Math.ceil((limit / 6.5) * 1.5) + 10;
+      else if (timeframe === '15Min') daysBack = Math.ceil((limit / 26) * 1.5) + 7;
+      else if (timeframe === '5Min') daysBack = Math.ceil((limit / 78) * 1.5) + 5;
+      const startISO = new Date(Date.now() - daysBack * 86400000).toISOString().split('T')[0];
+      const pageLimit = Math.min(Math.max(limit, 50), 10000);
+      let all = await fetchAllPages(barsUrl(symbol, timeframe, feed, startISO, pageLimit, 'desc'), limit);
+      if (all.length === 0) {
+        throw new Error(`Alpaca returned 0 bars for ${symbol}. Verify ticker, date range, and feed permissions.`);
+      }
+      const exhausted = all.length < limit * 0.9;        // history ran out (e.g. recent IPO)
+      all.sort((a, b) => new Date(b.t).getTime() - new Date(a.t).getTime());
+      all = all.slice(0, limit).reverse();
+      return { bars: normalizeBars(all), exhausted };
+    }
+
+    // Only asks Alpaca for bars since the last cached ones, then merges.
+    // Returns null if prices were re-adjusted (e.g. a split) so the caller does a full refresh.
+    async function downloadIncremental(symbol, timeframe, feed, cached) {
+      const prev = cached.bars;
+      const anchor = prev[Math.max(0, prev.length - 2)];
+      const startISO = new Date(anchor.time * 1000).toISOString();
+      const fetched = normalizeBars(await fetchAllPages(barsUrl(symbol, timeframe, feed, startISO, 10000, 'asc'), Infinity));
+      const fresh = fetched.find(b => b.time === anchor.time);
+      if (fresh && Math.abs(fresh.c - anchor.c) / anchor.c > 0.002) return null;
+      const m = new Map(prev.map(b => [b.time, b]));
+      let added = 0;
+      fetched.forEach(b => { if (!m.has(b.time)) added++; m.set(b.time, b); });
+      return { bars: Array.from(m.values()).sort((a, b) => a.time - b.time), added };
+    }
+
+    async function syncSymbol(symbol, timeframe, feed, limit, forceFull) {
+      let cached = null;
+      try { cached = await cacheGet(symbol, timeframe, feed); } catch (e) {}
+      const canIncrement = !forceFull && cached && cached.bars.length >= 2 &&
+        (cached.bars.length >= limit || cached.fullHistory);
+      let bars = null, mode = 'full', added = 0, fullHistory = false;
+
+      if (canIncrement) {
+        const inc = await downloadIncremental(symbol, timeframe, feed, cached);
+        if (inc) { bars = inc.bars; mode = 'incremental'; added = inc.added; fullHistory = !!cached.fullHistory; }
+      }
+      if (!bars) {
+        const full = await downloadFull(symbol, timeframe, feed, limit);
+        bars = full.bars; added = bars.length; fullHistory = full.exhausted;
+      }
+      if (bars.length > MAX_STORED_BARS) bars = bars.slice(-MAX_STORED_BARS);
+
+      const rec = {
+        key: cacheKey(symbol, timeframe, feed), symbol, timeframe, feed,
+        savedAt: new Date().toISOString(), fullHistory, bars
+      };
+      try { await cachePut(rec); } catch (e) { console.warn('Could not write candle cache:', e); }
+      return { rec, mode, added };
+    }
+
+    // =====================================================================
+    // Display helpers
+    // =====================================================================
+    function currentLimit() { return parseInt($('barsCount').value) || 500; }
+
+    function fmtAgo(date) {
+      const s = Math.max(0, (Date.now() - date.getTime()) / 1000);
+      if (s < 90) return 'just now';
+      if (s < 5400) return `${Math.round(s / 60)} min ago`;
+      if (s < 129600) return `${Math.round(s / 3600)} h ago`;
+      return `${Math.round(s / 86400)} d ago`;
+    }
+
+    function fmtBarTime(sec, timeframe) {
+      const d = new Date(sec * 1000);
+      if (isNaN(d.getTime())) return 'N/A';
+      const day = d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+      return timeframe === '1Day' ? day : `${day} ${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+    }
+
+    function clearChart() {
+      rawBars = [];
+      computedAvwapPoints = [];
+      computedRibbonPoints = [];
+      if (candleSeries) { candleSeries.setData([]); candleSeries.setMarkers([]); }
+      const canvas = $('cloudOverlayCanvas');
+      if (canvas) canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
+      drawings = []; draft = null; selectedId = null; drawKeyCur = '';
+      renderDrawings();
+    }
+
+    function showRecord(rec, statusText, statusType) {
+      rawBars = rec.bars.slice(-currentLimit());
+      lastSuccessfulFetch = new Date(rec.savedAt);
+      $('chartSymbolTimeframe').innerText = `${rec.symbol} - ${rec.timeframe} (${rawBars.length} Bars)`;
+      $('lastUpdatedLabel').textContent = `Saved ${fmtAgo(lastSuccessfulFetch)}`;
+      setStatus(statusText, statusType);
+      if (!candleSeries) initCharts();
+      runStrategyAndRender();
+      afterShow(rec);
+      updateWatermark(rec.symbol, rec.timeframe);
+    }
+
+    // Select a symbol: show cached candles instantly; fetch only if nothing is cached.
+    async function selectSymbol(symbol, { fetchIfMissing = true } = {}) {
+      symbol = symbol.trim().toUpperCase();
+      if (!symbol) return;
+      $('symbolInput').value = symbol;
+      try { localStorage.setItem('avwap_last_symbol', symbol); } catch (e) {}
+      const timeframe = $('timeframeSelect').value;
+      const feed = $('feedType').value;
+      const token = ++loadToken;
+      renderWatchlistTable();
+
+      let rec = null;
+      try { rec = await cacheGet(symbol, timeframe, feed); } catch (e) {}
+      if (token !== loadToken) return;
+
+      if (rec && rec.bars.length) {
+        const age = Date.now() - new Date(rec.savedAt).getTime();
+        showRecord(rec, `Loaded ${rec.bars.length} cached bars (saved ${fmtAgo(new Date(rec.savedAt))})`,
+          age > 86400000 ? 'amber' : 'green');
+        return;
+      }
+      if (fetchIfMissing && !cacheOnly() && hasCreds()) {
+        await fetchAlpacaData({ silent: true });
+        return;
+      }
+      clearChart();
+      $('chartSymbolTimeframe').innerText = `${symbol} - ${timeframe} (no cached candles)`;
+      updateWatermark(symbol, timeframe);
+      $('lastUpdatedLabel').textContent = 'Not cached';
+      setStatus(cacheOnly() ? `${symbol}: not in local cache` : `${symbol}: not cached yet — click Fetch Alpaca`, 'amber');
+    }
+
+    // Single-symbol fetch (button + auto-refresh): incremental when a cache exists.
+    async function fetchAlpacaData({ silent = false, force = false } = {}) {
+      if (busy) return;
+      const symbol = $('symbolInput').value.trim().toUpperCase();
+      const timeframe = $('timeframeSelect').value;
+      const feed = $('feedType').value;
+      const limit = currentLimit();
+
+      if (cacheOnly()) {
+        if (!silent) alert('Cache-only mode is on. Untick it to call Alpaca.');
+        return;
+      }
+      if (!hasCreds()) {
+        if (silent) { setStatus('Add Alpaca keys to download candles', 'amber'); return; }
+        alert('Please enter your Alpaca API Key and Secret in the top panel.');
+        return;
+      }
+      if (!symbol) {
+        if (!silent) alert('Please enter a valid stock ticker symbol.');
+        return;
+      }
+
+      busy = true;
+      setStatus('Connecting to Alpaca...', 'amber');
+      try {
+        const { rec, mode, added } = await syncSymbol(symbol, timeframe, feed, limit, force || $('forceFull').checked);
+        if ($('symbolInput').value.trim().toUpperCase() === symbol) {
+          showRecord(rec,
+            mode === 'incremental'
+              ? `Updated ${symbol}: ${added} new/updated bars • ${new Date().toLocaleTimeString()}`
+              : `Downloaded ${rec.bars.length} bars • ${new Date().toLocaleTimeString()}`,
+            'green');
+          $('lastUpdatedLabel').textContent = `Updated ${new Date().toLocaleString()}`;
+        }
+        setRowInfo(symbol, rec);
+        refreshCacheStats();
+      } catch (err) {
+        console.error('Alpaca Fetch Error:', err);
+        setStatus(`Fetch failed: ${err.message}`, 'red');
+        if (!silent) {
+          alert(`Alpaca API Error: ${err.message}\n\nTip: If opening via file:///, browsers may block CORS requests with headers. Test using a local server (e.g., npx serve) or click 'Test With Sample Data'.`);
+        }
+      } finally {
+        busy = false;
+      }
+    }
+
+    // =====================================================================
+    // Custom watchlists (stored in localStorage; candles live in IndexedDB)
+    // =====================================================================
+    const WL_KEY = 'avwap_watchlists_v1';
+
+    function parseSymbols(text) {
+      return [...new Set(String(text).toUpperCase().split(/[^A-Z0-9.\-]+/).filter(Boolean))];
+    }
+
+    function loadWatchlists() {
+      try {
+        const w = JSON.parse(localStorage.getItem(WL_KEY));
+        if (w && w.lists && typeof w.lists === 'object' && Object.keys(w.lists).length) {
+          if (!w.lists[w.active]) w.active = Object.keys(w.lists)[0];
+          return w;
+        }
+      } catch (e) {}
+      return { active: 'Default', lists: { Default: [$('symbolInput').value.trim().toUpperCase() || 'RUM'] } };
+    }
+
+    const DEFAULT_LIST_NAME = 'Main';
+    const DEFAULT_SYMBOLS = `NVDA, AAPL, GOOGL, GOOG, MSFT, AMZN, META, AVGO, TSLA, MU, BRK.B, LLY, JPM, AMD, WMT, V, XOM, JNJ, INTC, MA, ABBV, ORCL, CSCO, PLTR, CVX, BAC, COST, KO, DELL, CAT, MRK, PG, LRCX, UNH, AMAT, GE, MS, NFLX, PANW, HD, PM, GS, WFC, RTX, CRWD, ANET, GEV, TMO, SNDK, TXN, IBM, C, KLAC, LIN, MRVL, AXP, AMGN, QCOM, VZ, CRM, APH, GILD, DE, STX, PEP, DIS, SCHW, TMUS, ABT, MCD, ADI, T, BLK, NEE, UNP, WELL, COP, ETN, PFE, BX, BA, WDC, DHR, UBER, NOW, TJX, ISRG, CB, PLD, VRTX, NEM, BMY, BKNG, GLW, FTNT, PGR, LMT, COF, SPGI, VLO, MDT, MPC, PH, ACN, MO, CVS, SBUX, PSX, LOW, ADP, APP, SYK, BNY, MCK, FCX, EQIX, ADBE, SO, HOOD, ABNB, CME, GD, USB, TT, CEG, VRT, HCA, PWR, PNC, DUK, HWM, ELV, CSX, KKR, WMB, MNST, MAR, ICE, JCI, WM, UPS, MMM, DDOG, DASH, INTU, MRSH, EMR, AMT, CMCSA, HPE, LITE, MCO, CTAS, MDLZ, TRV, REGN, SPG, SHW, CDNS, SLB, EOG, ITW, ECL, MSI, GM, NOC, APO, CVNA, ROST, SNPS, CI, TGT, FDX, CMI, NSC, WBD, CL, KMI, DLR, ORLY, HLT, RSG, RCL, AEP, HON, ALL, APD, BSX, MRNA, AON, URI, AJG, MET, PCAR, TRGP, NUE, TEL, TDG, GWW, OXY, TFC, COR, OKE, AFL, PSA, COHR, CRH, NXPI, MPWR, D, FAST, KEYS, BKR, DVN, FIX, TER, FANG, CTVA, F, O, NKE, SRE, AME, GRMN, HONA, CAH, DAL, NDAQ, EW, STT, EBAY, BDX, ETR, CIEN, VMRK, FITB, AMP, VST, WDAY, WAB, LHX, AZO, XYZ, HUM, XEL, COIN, ADSK, ROK, VTR, PYPL, CARR, IQV, A, EXC, KDP, VEEV, ADM, CMG, WAT, PAYX, FERG, ARES, PRU, CBRE, FLEX, IBKR, MSCI, IDXX, ED, AIG, TTWO, DHI, LYV, SYY, NTAP, MCHP, ROP, YUM, AXON, ODFL, KR, HIG, TKO, PEG, STLD, MLM, UAL, KVUE, EXPE, WEC, EL, IRM, HSY, DXCM, CNC, ACGL, MTB, RMD, KMB, NTRS, BIIB, EME, HBAN, VMC, RJF, EQT, CCI, HPQ, JBL, EXR, CCL, ZTS, PCG, RDDT, KHC, GEHC, WTW, AEE, CFG, HAL, MTD, IR, TDY, CTSH, CBOE, DG, AWK, CPRT, ATO, ECHO, FOXA, DGX, VRSN, WRB, DTE, ON, VICI, CPAY, SMCI, FE, LVS, FISV, LH, OTIS, CINF, ES, FOX, INCY, WST, WSM, DOV, CNP, PPL, XYL, PFG, FFIV, EXPD, Q, RF, SYF, TPL, SW, DRI, PPG, HUBB, ULTA, VLTO, TPR, VRSK, BG, GPN, CHD, CASY, KEY, NRG, PHM, JBHT, L, TROW, CHTR, BRO, IFF, FSLR, OMC, DLTR, EIX, DOW, STZ, FICO, PKG, CMS, LYB, EXE, STE, CF, RL, BBY, LUV, VTRS, NI, GIS, AMCR, SNA, SBAC, LEN, EFX, IP, FIS, BR, CDW, EVRG, TSN, FDXF, GEN, GPC, ESS, ZBH, CHRW, NDSN, DD, LNT, TSCO, J, NWS, BEN, NVR, FTV, ZBRA, LDOS, RVTY, IEX, NWSA, INVH, BALL, APA, ROL, WY, AKAM, HST, KIM, SOLV, PTC, EG, MAA, DOC, AIZ, TYL, TXT, SWKS, REG, ALB, SWK, CRL, MAS, TRMB, MKC, IVZ, GL, SJM, ALLE, AVY, ERIE, HAS, GDDY, LII, GNRC, BF.B, PSKY, BAX, CSGP, IT, UDR, DVA, PNW, HRL, BXP, TECH, LULU, JKHY, HII, DECK, UHS, ALGN, AES, CPT, CLX, COO, FDS, DPZ, ARE, PODD, FRT, MGM, HSIC, APTV, PNR, WYNN, MOS, AOS, TAP, TTD, NCLH, BLDR`;
+    let wl = loadWatchlists();
+    // One-time: install the default watchlist and make it the active one
+    try {
+      if (localStorage.getItem('avwap_seed_main_v1') !== '1') {
+        const names = Object.keys(wl.lists);
+        if (names.length === 1 && wl.lists[names[0]].length <= 1 && names[0] !== DEFAULT_LIST_NAME) delete wl.lists[names[0]];
+        wl.lists[DEFAULT_LIST_NAME] = parseSymbols(DEFAULT_SYMBOLS);
+        wl.active = DEFAULT_LIST_NAME;
+        localStorage.setItem(WL_KEY, JSON.stringify(wl));
+        localStorage.setItem('avwap_seed_main_v1', '1');
+      }
+    } catch (e) {}
+    function saveWatchlists() { try { localStorage.setItem(WL_KEY, JSON.stringify(wl)); } catch (e) {} }
+    function currentList() { return wl.lists[wl.active] || []; }
+
+    function renderWatchlistEditor() {
+      const sel = $('wlSelect');
+      sel.innerHTML = '';
+      Object.keys(wl.lists).forEach(name => {
+        const o = document.createElement('option');
+        o.value = name;
+        o.textContent = `${name} (${wl.lists[name].length})`;
+        if (name === wl.active) o.selected = true;
+        sel.appendChild(o);
+      });
+      $('wlText').value = currentList().join(', ');
+    }
+
+    function quickState(bars) {
+      const slice = bars.slice(-currentLimit());
+      const anchorN = Math.max(1, parseInt($('paramAnchor').value) || 120);
+      const fastLen = parseInt($('paramFast').value) || 10;
+      const slowLen = parseInt($('paramSlow').value) || 21;
+      const mult = parseFloat($('paramCloudMult').value) || 0.3;
+      const atrLen = parseInt($('paramAtrLen').value) || 14;
+      if (slice.length < Math.max(slowLen, atrLen) + 2) return null;
+
+      const closes = slice.map(b => b.c);
+      let sumPV = 0, sumV = 0, vwap = NaN;
+      for (let i = 0; i < slice.length; i++) {
+        sumPV += ((slice[i].h + slice[i].l + slice[i].c) / 3) * slice[i].v;
+        sumV += slice[i].v;
+        const ex = i - anchorN;
+        if (ex >= 0) { sumPV -= ((slice[ex].h + slice[ex].l + slice[ex].c) / 3) * slice[ex].v; sumV -= slice[ex].v; }
+        vwap = sumV > 0 ? sumPV / sumV : closes[i];
+      }
+      const i = slice.length - 1;
+      const fast = calculateEMA(closes, fastLen)[i];
+      const slow = calculateEMA(closes, slowLen)[i];
+      const atr = calculateATR(slice, atrLen)[i] || closes[i] * 0.02;
+      const bull = fast > slow && Math.abs(fast - slow) > atr * mult && closes[i] > vwap;
+      return { bull, close: closes[i], pct: (closes[i] / vwap - 1) * 100 };
+    }
+
+    function makeRowInfo(rec) {
+      if (!rec || !rec.bars.length) return null;
+      return {
+        n: rec.bars.length,
+        last: rec.bars[rec.bars.length - 1].time,
+        timeframe: rec.timeframe,
+        state: quickState(rec.bars)
+      };
+    }
+
+    function setRowInfo(symbol, rec) {
+      rowInfo.set(symbol, makeRowInfo(rec));
+      renderWatchlistTable();
+    }
+
+    async function refreshRows() {
+      const token = ++rowsToken;
+      const tf = $('timeframeSelect').value, feed = $('feedType').value;
+      const info = new Map();
+      for (const sym of currentList()) {
+        let rec = null;
+        try { rec = await cacheGet(sym, tf, feed); } catch (e) {}
+        if (token !== rowsToken) return;
+        info.set(sym, makeRowInfo(rec));
+      }
+      rowInfo = info;
+      renderWatchlistTable();
+      refreshCacheStats();
+    }
+
+    function visibleSymbols() {
+      const bullOnly = $('wlBullOnly').checked;
+      return currentList().filter(s => {
+        if (!bullOnly) return true;
+        const i = rowInfo.get(s);
+        return i && i.state && i.state.bull;
+      });
+    }
+
+    function renderWatchlistTable() {
+      const tbody = $('wlTableBody');
+      const active = $('symbolInput').value.trim().toUpperCase();
+      const all = currentList();
+      const syms = visibleSymbols();
+      const ms = $('mobSym'); if (ms) ms.textContent = active || '—';
+      $('wlCount').textContent = all.length ? `(${syms.length === all.length ? all.length : syms.length + ' of ' + all.length})` : '';
+
+      if (!syms.length) {
+        tbody.innerHTML = `<tr><td colspan="7" class="p-3 text-center text-gray-500">${
+          all.length ? 'No symbols match the current filter.' : 'Watchlist is empty. Paste symbols on the left and click Save List.'}</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = syms.map(sym => {
+        const info = rowInfo.get(sym);
+        const st = info && info.state;
+        const isActive = sym === active;
+        const pillCls = st ? (st.bull ? 'text-green-400' : 'text-gray-400') : 'text-gray-600';
+        const pill = st ? (st.bull ? '● Bullish' : '○ Neutral / Bear') : '—';
+        const pctCls = st ? (st.pct >= 0 ? 'text-green-400' : 'text-red-400') : 'text-gray-600';
+        return `<tr data-sym="${sym}" class="cursor-pointer hover:bg-gray-800 ${isActive ? 'bg-gray-800' : ''}">
+          <td class="p-2 font-semibold ${isActive ? 'text-white' : 'text-gray-200'}">${sym}</td>
+          <td class="p-2 text-gray-400 hm">${info ? info.n : '—'}</td>
+          <td class="p-2 text-gray-400 hm">${info ? fmtBarTime(info.last, info.timeframe) : 'not cached'}</td>
+          <td class="p-2 font-mono">${st ? '$' + st.close.toFixed(2) : '—'}</td>
+          <td class="p-2 font-mono ${pctCls}">${st ? (st.pct >= 0 ? '+' : '') + st.pct.toFixed(1) + '%' : '—'}</td>
+          <td class="p-2 ${pillCls}">${pill}</td>
+          <td class="p-2 text-right"><button data-remove="${sym}" title="Remove from list (cached candles are kept)" class="text-gray-500 hover:text-red-400 px-1">✕</button></td>
+        </tr>`;
+      }).join('');
+    }
+
+    // Update every watchlist symbol (incremental when cached), sequentially to respect rate limits.
+    let updateAbort = false;
+    async function updateAll() {
+      if (busy) { updateAbort = true; return; }
+      if (cacheOnly()) { alert('Cache-only mode is on. Untick it to call Alpaca.'); return; }
+      if (!hasCreds()) { alert('Please enter your Alpaca API Key and Secret in the top panel.'); return; }
+      const list = currentList().slice();
+      if (!list.length) { alert('Watchlist is empty.'); return; }
+
+      const timeframe = $('timeframeSelect').value, feed = $('feedType').value, limit = currentLimit();
+      const force = $('forceFull').checked;
+      busy = true; updateAbort = false;
+      $('wlUpdateAllLabel').textContent = 'Stop';
+      let ok = 0; const failed = [];
+
+      for (let i = 0; i < list.length; i++) {
+        if (updateAbort) break;
+        const sym = list[i];
+        $('wlProgress').textContent = `Updating ${i + 1}/${list.length}: ${sym}`;
+        try {
+          const { rec } = await syncSymbol(sym, timeframe, feed, limit, force);
+          ok++;
+          setRowInfo(sym, rec);
+        } catch (e) {
+          failed.push(`${sym}: ${e.message}`);
+          if (e.status === 401 || e.status === 403) break;     // credentials problem — no point continuing
+        }
+        await sleep(150);
+      }
+
+      busy = false;
+      $('wlUpdateAllLabel').textContent = 'Update All';
+      $('wlProgress').textContent = updateAbort ? `Stopped (${ok} updated)` : `Done: ${ok}/${list.length} updated`;
+      setStatus(failed.length ? `Updated ${ok}/${list.length} • ${failed.length} failed` : `Updated ${ok} symbols`,
+        failed.length ? 'amber' : 'green');
+      if (failed.length) console.warn('Watchlist update failures:', failed);
+      if (failed.length) alert(`Some symbols failed:\n\n${failed.slice(0, 10).join('\n')}${failed.length > 10 ? '\n…' : ''}`);
+      await refreshCacheStats();
+      selectSymbol($('symbolInput').value, { fetchIfMissing: false });
+    }
+
+    // ---- Cache export / import / clear ----
+    async function exportCache() {
+      try {
+        const recs = await cacheListAll();
+        if (!recs.length) { alert('The cache is empty.'); return; }
+        const blob = new Blob([JSON.stringify({ version: 1, exportedAt: new Date().toISOString(), series: recs })],
+          { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `avwap_candle_cache_${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      } catch (e) { alert(`Export failed: ${e.message}`); }
+    }
+
+    async function importCache(file) {
+      try {
+        const data = JSON.parse(await file.text());
+        if (!data || !Array.isArray(data.series)) throw new Error('Not a candle cache export');
+        let n = 0;
+        for (const r of data.series) {
+          if (!r.symbol || !r.timeframe || !r.feed || !Array.isArray(r.bars)) continue;
+          const existing = await cacheGet(r.symbol, r.timeframe, r.feed);
+          const m = new Map((existing ? existing.bars : []).map(b => [b.time, b]));
+          r.bars.forEach(b => m.set(b.time, b));
+          const bars = Array.from(m.values()).sort((a, b) => a.time - b.time).slice(-MAX_STORED_BARS);
+          const savedAt = [existing && existing.savedAt, r.savedAt].filter(Boolean).sort().pop() || new Date().toISOString();
+          await cachePut({
+            key: cacheKey(r.symbol, r.timeframe, r.feed), symbol: r.symbol, timeframe: r.timeframe, feed: r.feed,
+            savedAt, fullHistory: !!(r.fullHistory || (existing && existing.fullHistory)), bars
+          });
+          n++;
+        }
+        setStatus(`Imported ${n} series into local cache`, 'green');
+        await refreshRows();
+        selectSymbol($('symbolInput').value, { fetchIfMissing: false });
+      } catch (e) {
+        alert(`Import failed: ${e.message}`);
+      }
+    }
+
+    // Strategy Execution & Rendering
+    function runStrategyAndRender() {
+      if (!rawBars || rawBars.length === 0) return;
+      if (!candleSeries) initCharts();
+
+      const barsAnchor = Math.max(1, parseInt(document.getElementById('paramAnchor').value) || 120);
+      const fastLen = parseInt(document.getElementById('paramFast').value) || 10;
+      const slowLen = parseInt(document.getElementById('paramSlow').value) || 21;
+      const minHeightMult = parseFloat(document.getElementById('paramCloudMult').value) || 0.3;
+      const atrLen = parseInt(document.getElementById('paramAtrLen').value) || 14;
+
+      const closes = rawBars.map(b => b.c);
+      const volumes = rawBars.map(b => b.v);
+      const typicalPrices = rawBars.map(b => (b.h + b.l + b.c) / 3);
+
+      // 1. Volume-weighted price over the most recent N bars.
+      // Unlike the old EMA ratio, this uses actual cumulative price-volume
+      // and volume sums inside the selected rolling anchor window.
+      const avwap = new Array(rawBars.length).fill(NaN);
+      let sumPV = 0;
+      let sumV = 0;
+      for (let i = 0; i < rawBars.length; i++) {
+        sumPV += typicalPrices[i] * volumes[i];
+        sumV += volumes[i];
+        const expired = i - barsAnchor;
+        if (expired >= 0) {
+          sumPV -= typicalPrices[expired] * volumes[expired];
+          sumV -= volumes[expired];
+        }
+        avwap[i] = sumV > 0 ? sumPV / sumV : closes[i];
+      }
+
+      // 2. EMA Cloud & ATR
+      const emaFast = calculateEMA(closes, fastLen);
+      const emaSlow = calculateEMA(closes, slowLen);
+      const atr = calculateATR(rawBars, atrLen);
+
+      // 3. Build data and ribbon coordinates
+      const candleData = rawBars.map(b => ({ time: b.time, open: b.o, high: b.h, low: b.l, close: b.c }));
+      computedAvwapPoints = [];
+      computedRibbonPoints = [];
+
+      for (let i = 0; i < rawBars.length; i++) {
+        const t = rawBars[i].time;
+        const c = closes[i];
+        const vwapVal = avwap[i];
+        const fast = emaFast[i];
+        const slow = emaSlow[i];
+        const currentAtr = atr[i] || (c * 0.02);
+
+        // Keep one AVWAP path; the canvas renderer colors each segment.
+        if (Number.isFinite(vwapVal)) {
+          computedAvwapPoints.push({ time: t, value: vwapVal, isBullish: c >= vwapVal });
+        }
+
+        // Floating EMA Ribbon coordinates
+        if (!isNaN(fast) && !isNaN(slow)) {
+          const height = Math.abs(fast - slow);
+          const hasMinHeight = height > (currentAtr * minHeightMult);
+
+          computedRibbonPoints.push({
+            time: t,
+            fast: fast,
+            slow: slow,
+            isBullish: (fast > slow) && hasMinHeight,
+            isBearish: (fast < slow) && hasMinHeight
+          });
+        }
+      }
+
+      candleSeries.setData(candleData);
+      applyAutoFit();
+
+
+      // 4. Backtest Simulation & Signals
+      const slAtrMult = parseFloat(document.getElementById('paramSL').value) || 2.0;
+      const tpAtrMult = parseFloat(document.getElementById('paramTP').value) || 3.5;
+
+      const trades = [];
+      let inPosition = false;
+      let currentTrade = null;
+      const markers = [];
+
+      for (let i = Math.max(barsAnchor, slowLen); i < rawBars.length; i++) {
+        const c = closes[i];
+        const fast = emaFast[i];
+        const prevFast = emaFast[i - 1];
+        const slow = emaSlow[i];
+        const currentAvwap = avwap[i];
+        const prevAvwap = avwap[i - 1];
+        const currentAtr = atr[i] || (c * 0.02);
+
+        const cloudHeight = Math.abs(fast - slow);
+        const hasMinHeight = cloudHeight > (currentAtr * minHeightMult);
+
+        const isBullishCloud = (fast > slow) && hasMinHeight;
+        const isAvwapBullish = c > currentAvwap;
+        const emaCrossAboveAvwap = (prevFast <= prevAvwap) && (fast > currentAvwap);
+
+        // Entry Trigger: Bullish Cloud + Price > AVWAP + Fast EMA crossing above AVWAP
+        const trigger = isBullishCloud && isAvwapBullish && emaCrossAboveAvwap;
+
+        if (!inPosition && trigger) {
+          inPosition = true;
+          currentTrade = {
+            id: trades.length + 1,
+            entryIndex: i,
+            entryTime: rawBars[i].time,
+            entryPrice: c,
+            stopLoss: c - (currentAtr * slAtrMult),
+            takeProfit: c + (currentAtr * tpAtrMult)
+          };
+          markers.push({
+            time: rawBars[i].time,
+            position: 'belowBar',
+            color: '#10b981',
+            shape: 'arrowUp',
+            text: 'BUY'
+          });
+        } else if (inPosition) {
+          const high = rawBars[i].h;
+          const low = rawBars[i].l;
+
+          let exitPrice = null;
+          let exitReason = '';
+
+          if (low <= currentTrade.stopLoss) {
+            exitPrice = currentTrade.stopLoss;
+            exitReason = 'Stop Loss (ATR)';
+          } else if (high >= currentTrade.takeProfit) {
+            exitPrice = currentTrade.takeProfit;
+            exitReason = 'Take Profit (ATR)';
+          } else if (fast < slow) {
+            exitPrice = c;
+            exitReason = 'Cloud Inversion';
+          }
+
+          if (exitPrice !== null) {
+            inPosition = false;
+            currentTrade.exitTime = rawBars[i].time;
+            currentTrade.exitPrice = exitPrice;
+            currentTrade.exitReason = exitReason;
+            currentTrade.pnlPercent = ((exitPrice - currentTrade.entryPrice) / currentTrade.entryPrice) * 100;
+            trades.push(currentTrade);
+
+            markers.push({
+              time: rawBars[i].time,
+              position: 'aboveBar',
+              color: currentTrade.pnlPercent >= 0 ? '#38bdf8' : '#f43f5e',
+              shape: 'arrowDown',
+              text: `${exitReason.split(' ')[0]}`
+            });
+            currentTrade = null;
+          }
+        }
+      }
+
+      candleSeries.setMarkers(markers);
+      renderMetrics(trades, isBullishState(closes.length - 1, emaFast, emaSlow, atr, minHeightMult, closes, avwap));
+      renderTradeTable(trades);
+
+      // Render the floating cloud canvas
+      resizeCanvas();
+      setTimeout(renderCloudOverlay, 50);
+    }
+
+    function isBullishState(i, emaFast, emaSlow, atr, minHeightMult, closes, avwap) {
+      if (i < 0) return false;
+      const height = Math.abs(emaFast[i] - emaSlow[i]);
+      const minH = height > (atr[i] * minHeightMult);
+      return (emaFast[i] > emaSlow[i]) && minH && (closes[i] > avwap[i]);
+    }
+
+    function renderMetrics(trades, isCurrentBullish) {
+      const totalTrades = trades.length;
+      document.getElementById('metricTrades').innerText = totalTrades;
+
+      if (totalTrades === 0) {
+        document.getElementById('metricWinRate').innerText = '0.0%';
+        document.getElementById('metricReturn').innerText = '0.0%';
+        document.getElementById('metricPF').innerText = '0.00';
+        document.getElementById('metricDD').innerText = '0.0%';
+        return;
+      }
+
+      const wins = trades.filter(t => t.pnlPercent > 0);
+      const winRate = (wins.length / totalTrades) * 100;
+      document.getElementById('metricWinRate').innerText = `${winRate.toFixed(1)}%`;
+
+      let cumulative = 1;
+      let peak = 1;
+      let maxDD = 0;
+      let totalGains = 0;
+      let totalLosses = 0;
+
+      trades.forEach(t => {
+        const factor = 1 + (t.pnlPercent / 100);
+        cumulative *= factor;
+        if (cumulative > peak) peak = cumulative;
+        const dd = (peak - cumulative) / peak;
+        if (dd > maxDD) maxDD = dd;
+
+        if (t.pnlPercent > 0) totalGains += t.pnlPercent;
+        else totalLosses += Math.abs(t.pnlPercent);
+      });
+
+      const totalReturn = (cumulative - 1) * 100;
+      const pf = totalLosses === 0 ? (totalGains > 0 ? 99.9 : 0) : (totalGains / totalLosses);
+
+      const retEl = document.getElementById('metricReturn');
+      retEl.innerText = `${totalReturn >= 0 ? '+' : ''}${totalReturn.toFixed(1)}%`;
+      retEl.className = `text-lg font-bold ${totalReturn >= 0 ? 'text-green-400' : 'text-red-400'}`;
+
+      document.getElementById('metricPF').innerText = pf.toFixed(2);
+      document.getElementById('metricDD').innerText = `${(maxDD * 100).toFixed(1)}%`;
+
+      const confEl = document.getElementById('metricConfluence');
+      if (isCurrentBullish) {
+        confEl.innerText = 'Bullish Confluence Active';
+        confEl.className = 'text-xs font-semibold text-green-400 mt-1';
+      } else {
+        confEl.innerText = 'Neutral / Bearish';
+        confEl.className = 'text-xs font-semibold text-gray-400 mt-1';
+      }
+    }
+
+    function formatBarDate(timestamp) {
+      if (!timestamp) return 'N/A';
+      const d = new Date(Number(timestamp) * 1000);
+      if (isNaN(d.getTime())) return 'N/A';
+      return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    }
+
+    function renderTradeTable(trades) {
+      const tbody = document.getElementById('tradeTableBody');
+      if (trades.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="p-3 text-center text-gray-500">No strategy signals triggered within lookback window.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = trades.slice().reverse().map(t => {
+        const isWin = t.pnlPercent >= 0;
+        return `
+          <tr class="hover:bg-gray-800">
+            <td class="p-2 font-mono text-gray-400">${t.id}</td>
+            <td class="p-2">${formatBarDate(t.entryTime)}</td>
+            <td class="p-2 font-mono">$${t.entryPrice.toFixed(2)}</td>
+            <td class="p-2">${formatBarDate(t.exitTime)}</td>
+            <td class="p-2 font-mono">$${t.exitPrice.toFixed(2)}</td>
+            <td class="p-2 text-gray-400">${t.exitReason}</td>
+            <td class="p-2 font-mono font-semibold ${isWin ? 'text-green-400' : 'text-red-400'}">
+              ${isWin ? '+' : ''}${t.pnlPercent.toFixed(2)}%
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    // CSV Export
+    document.getElementById('exportCsvBtn').addEventListener('click', () => {
+      const rows = Array.from(document.querySelectorAll('#tradeTableBody tr'));
+      if (rows.length === 0 || rows[0].innerText.includes('No strategy')) {
+        alert('No trades available to export.');
+        return;
+      }
+      let csv = 'ID,Entry Date,Entry Price,Exit Date,Exit Price,Exit Reason,PnL (%)\n';
+      rows.forEach(r => {
+        const cols = Array.from(r.querySelectorAll('td')).map(td => td.innerText.replace(',', ''));
+        csv += cols.join(',') + '\n';
+      });
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `Alpaca_Backtest_${document.getElementById('symbolInput').value}.csv`;
+      a.click();
+    });
+
+    function configureAutoRefresh() {
+      if (autoRefreshTimer) {
+        clearInterval(autoRefreshTimer);
+        autoRefreshTimer = null;
+      }
+      if (!document.getElementById('autoRefreshToggle').checked) return;
+      const timeframe = document.getElementById('timeframeSelect').value;
+      const intervalMs = timeframe === '1Day' ? 5 * 60 * 1000 : 60 * 1000;
+      autoRefreshTimer = setInterval(() => {
+        // Only fetch live data when credentials are present; never replace live bars with demo data.
+        if (keyInput.value.trim() && secretInput.value.trim() && !cacheOnly()) fetchAlpacaData({ silent: true });
+      }, intervalMs);
+    }
+
+    // ---- Watchlist / cache UI wiring ----
+    $('wlSelect').addEventListener('change', () => {
+      wl.active = $('wlSelect').value;
+      saveWatchlists();
+      renderWatchlistEditor();
+      refreshRows();
+    });
+
+    $('wlNewBtn').addEventListener('click', () => {
+      const name = (prompt('Name for the new watchlist:') || '').trim();
+      if (!name) return;
+      if (!wl.lists[name]) wl.lists[name] = [];
+      wl.active = name;
+      saveWatchlists();
+      renderWatchlistEditor();
+      refreshRows();
+    });
+
+    $('wlDeleteBtn').addEventListener('click', () => {
+      const names = Object.keys(wl.lists);
+      if (names.length <= 1) { alert('You need at least one watchlist.'); return; }
+      if (!confirm(`Delete watchlist "${wl.active}"? Cached candles are kept.`)) return;
+      delete wl.lists[wl.active];
+      wl.active = Object.keys(wl.lists)[0];
+      saveWatchlists();
+      renderWatchlistEditor();
+      refreshRows();
+    });
+
+    function applyWatchlistText() {
+      wl.lists[wl.active] = parseSymbols($('wlText').value);
+      saveWatchlists();
+      renderWatchlistEditor();
+      refreshRows();
+    }
+    $('wlApplyBtn').addEventListener('click', applyWatchlistText);
+    $('wlText').addEventListener('change', applyWatchlistText);
+
+    $('wlAddCurrentBtn').addEventListener('click', () => {
+      const sym = parseSymbols($('symbolInput').value)[0];
+      if (!sym) return;
+      if (!currentList().includes(sym)) {
+        wl.lists[wl.active].push(sym);
+        saveWatchlists();
+        renderWatchlistEditor();
+        refreshRows();
+      }
+    });
+
+    $('wlTableBody').addEventListener('click', e => {
+      const rm = e.target.closest('[data-remove]');
+      if (rm) {
+        const sym = rm.getAttribute('data-remove');
+        wl.lists[wl.active] = currentList().filter(s => s !== sym);
+        saveWatchlists();
+        rowInfo.delete(sym);
+        renderWatchlistEditor();
+        renderWatchlistTable();
+        return;
+      }
+      const tr = e.target.closest('tr[data-sym]');
+      if (tr) selectSymbol(tr.getAttribute('data-sym'));
+    });
+
+    // Step through the list with arrow keys while the table is focused
+    $('wlTableWrap').addEventListener('keydown', e => {
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      const syms = visibleSymbols();
+      if (!syms.length) return;
+      e.preventDefault();
+      const cur = syms.indexOf($('symbolInput').value.trim().toUpperCase());
+      const next = e.key === 'ArrowDown' ? Math.min(syms.length - 1, cur + 1) : Math.max(0, cur <= 0 ? 0 : cur - 1);
+      selectSymbol(syms[next]);
+    });
+
+    $('wlBullOnly').addEventListener('change', renderWatchlistTable);
+    $('wlUpdateAllBtn').addEventListener('click', updateAll);
+
+    $('cacheOnly').addEventListener('change', () => {
+      try { localStorage.setItem('avwap_cache_only', $('cacheOnly').checked ? '1' : '0'); } catch (e) {}
+      setStatus($('cacheOnly').checked ? 'Cache-only mode: no Alpaca requests will be made' : 'Cache-only mode off', 'slate');
+    });
+    $('cacheExportBtn').addEventListener('click', exportCache);
+    $('cacheImportBtn').addEventListener('click', () => $('cacheImportFile').click());
+    $('cacheImportFile').addEventListener('change', e => {
+      const f = e.target.files && e.target.files[0];
+      if (f) importCache(f);
+      e.target.value = '';
+    });
+    $('cacheClearBtn').addEventListener('click', async () => {
+      if (!confirm('Delete ALL locally cached candles for every symbol and timeframe?')) return;
+      try {
+        await cacheClearAll();
+        setStatus('Local candle cache cleared', 'amber');
+        await refreshRows();
+      } catch (e) { alert(`Could not clear cache: ${e.message}`); }
+    });
+
+    // ---- Main controls ----
+    $('fetchBtn').addEventListener('click', () => fetchAlpacaData());
+    $('runBacktestBtn').addEventListener('click', () => { runStrategyAndRender(); refreshRows(); });
+    $('autoRefreshToggle').addEventListener('change', configureAutoRefresh);
+    $('timeframeSelect').addEventListener('change', configureAutoRefresh);
+
+    // Changing symbol / timeframe / feed / lookback shows the matching cached candles immediately.
+    ['symbolInput', 'timeframeSelect', 'feedType', 'barsCount'].forEach(id => {
+      $(id).addEventListener('change', () => {
+        const symbol = $('symbolInput').value.trim().toUpperCase();
+        if (id !== 'symbolInput' && id !== 'barsCount') refreshRows();
+        if (symbol) selectSymbol(symbol, { fetchIfMissing: false });
+      });
+    });
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      initCharts();
+      safeIcons();
+      try { $('cacheOnly').checked = localStorage.getItem('avwap_cache_only') === '1'; } catch (e) {}
+      renderWatchlistEditor();
+      try { await migrateLegacyCache(); } catch (e) {}
+
+      let last = '';
+      try { last = localStorage.getItem('avwap_last_symbol') || ''; } catch (e) {}
+      if (last) $('symbolInput').value = last;
+
+      await refreshRows();
+      const sym = $('symbolInput').value.trim().toUpperCase();
+      if (sym) await selectSymbol(sym, { fetchIfMissing: false });
+
+      // Ask the browser not to evict the candle cache under storage pressure (best effort)
+      try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+    });
+
+    // ---- Play / pause: auto-cycle through the watchlist ----
+    let playTimer = null;
+    function stepSymbol(dir) {
+      const syms = visibleSymbols();
+      if (!syms.length) return;
+      const cur = syms.indexOf($('symbolInput').value.trim().toUpperCase());
+      // prefer symbols that have cached candles so playback never stalls on empty charts
+      let idx = cur, pick = -1;
+      for (let k = 1; k <= syms.length; k++) {
+        const j = ((cur < 0 ? (dir > 0 ? -1 : 0) : cur) + dir * k + syms.length * k) % syms.length;
+        if (rowInfo.get(syms[j])) { pick = j; break; }
+        if (k === 1) idx = j;
+      }
+      selectSymbol(syms[pick >= 0 ? pick : idx], { fetchIfMissing: false });
+    }
+    function setPlaying(on) {
+      if (playTimer) { clearInterval(playTimer); playTimer = null; }
+      const btn = $('playToggleBtn');
+      if (on) {
+        playTimer = setInterval(() => stepSymbol(1), (parseInt($('playSpeed').value) || 3) * 1000);
+        btn.textContent = '⏸ Pause'; mobPlayText('⏸ Pause');
+        btn.className = 'bg-yellow-600 hover:bg-yellow-500 text-white font-semibold px-3 py-0.5 rounded text-xs';
+      } else {
+        btn.textContent = '▶ Play'; mobPlayText('▶ Play');
+        btn.className = 'bg-green-600 hover:bg-green-500 text-white font-semibold px-3 py-0.5 rounded text-xs';
+      }
+    }
+    $('playToggleBtn').addEventListener('click', () => {
+      if (!playTimer && visibleSymbols().length < 2) { alert('Add at least two symbols to the watchlist to cycle through them.'); return; }
+      setPlaying(!playTimer);
+    });
+    $('playNextBtn').addEventListener('click', () => stepSymbol(1));
+    $('playPrevBtn').addEventListener('click', () => stepSymbol(-1));
+    $('playSpeed').addEventListener('change', () => { if (playTimer) setPlaying(true); });
+    document.addEventListener('keydown', e => {
+      if (e.code !== 'Space' || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test((e.target.tagName || ''))) return;
+      e.preventDefault();
+      $('playToggleBtn').click();
+    });
+
+    // =====================================================================
+    // Drawing tools (stored per symbol + timeframe), image export, right-side space
+    // Drawings are anchored to time + price, so they survive reloads and cache updates.
+    // =====================================================================
+    const DRAW_KEY = 'avwap_drawings_v1';
+    const drawStore = (() => { try { return JSON.parse(localStorage.getItem(DRAW_KEY)) || {}; } catch (e) { return {}; } })();
+    let drawings = [], drawKeyCur = '', tool = 'cursor', draft = null, selectedId = null;
+    let drawVisible = true, dragState = null, undoStack = [], lastViewKey = '', lastSig = '';
+    const scratchCtx = document.createElement('canvas').getContext('2d');
+    const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1, 1.618];
+    const FIB_COLORS = ['#94a3b8', '#f87171', '#fb923c', '#facc15', '#4ade80', '#2dd4bf', '#60a5fa', '#c084fc'];
+    const TOOL_POINTS = { trend: 2, ray: 2, rect: 2, fib: 2, measure: 2, channel: 3, hline: 1, vline: 1, text: 1, rr: 3 };
+
+    function persistDrawings() {
+      if (!drawKeyCur) return;
+      if (drawings.length) drawStore[drawKeyCur] = drawings; else delete drawStore[drawKeyCur];
+      try { localStorage.setItem(DRAW_KEY, JSON.stringify(drawStore)); } catch (e) {}
+    }
+    function loadDrawingsFor(sym, tf) {
+      drawKeyCur = `${sym}|${tf}`;
+      drawings = JSON.parse(JSON.stringify(drawStore[drawKeyCur] || []));
+      selectedId = null; draft = null; undoStack = [];
+      renderDrawings();
+    }
+    function pushUndo() { undoStack.push(JSON.stringify(drawings)); if (undoStack.length > 50) undoStack.shift(); }
+    function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+
+    // ---- time <-> logical index (works past the last bar, i.e. in the right-side space) ----
+    function barStep() {
+      const n = rawBars.length;
+      if (n < 2) return 86400;
+      const d = [];
+      for (let i = Math.max(1, n - 20); i < n; i++) d.push(rawBars[i].time - rawBars[i - 1].time);
+      d.sort((a, b) => a - b);
+      return d[Math.floor(d.length / 2)] || 86400;
+    }
+    function timeToLogical(t) {
+      const n = rawBars.length;
+      if (!n) return 0;
+      const first = rawBars[0].time, last = rawBars[n - 1].time;
+      if (t >= last) return n - 1 + (t - last) / barStep();
+      if (t <= first) return -(first - t) / barStep();
+      let lo = 0, hi = n - 1;
+      while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (rawBars[mid].time <= t) lo = mid; else hi = mid; }
+      return lo + (t - rawBars[lo].time) / (rawBars[hi].time - rawBars[lo].time);
+    }
+    function logicalToTime(l) {
+      const n = rawBars.length;
+      if (!n) return 0;
+      if (l >= n - 1) return rawBars[n - 1].time + (l - (n - 1)) * barStep();
+      if (l <= 0) return rawBars[0].time + l * barStep();
+      const i = Math.floor(l);
+      return rawBars[i].time + (l - i) * (rawBars[i + 1].time - rawBars[i].time);
+    }
+    function toXY(pt) {
+      try {
+        const x = mainChartInstance.timeScale().logicalToCoordinate(timeToLogical(pt.t));
+        const y = candleSeries.priceToCoordinate(pt.p);
+        return (x == null || y == null) ? null : { x, y };
+      } catch (e) { return null; }
+    }
+    function fromXY(x, y) {
+      try {
+        const l = mainChartInstance.timeScale().coordinateToLogical(x);
+        const p = candleSeries.coordinateToPrice(y);
+        return (l == null || p == null) ? null : { t: logicalToTime(l), p, l };
+      } catch (e) { return null; }
+    }
+    function snapPoint(x, y) {
+      const pt = fromXY(x, y);
+      if (!pt) return null;
+      if ($('drawMagnet').checked) {
+        const idx = Math.round(pt.l);
+        if (idx >= 0 && idx < rawBars.length) {
+          const b = rawBars[idx];
+          let best = null, bd = 25;
+          [b.o, b.h, b.l, b.c].forEach(pr => {
+            const yy = candleSeries.priceToCoordinate(pr);
+            if (yy != null && Math.abs(yy - y) < bd) { bd = Math.abs(yy - y); best = pr; }
+          });
+          if (best != null) return { t: b.time, p: best };
+        }
+      }
+      return { t: pt.t, p: pt.p };
+    }
+    function plotSize() {
+      const c = $('drawCanvas');
+      let w = parseFloat(c.style.width) || c.clientWidth, h = parseFloat(c.style.height) || c.clientHeight;
+      try { const tw = mainChartInstance.timeScale().width(); if (tw > 0) w = tw; } catch (e) {}
+      try { const th = mainChartInstance.timeScale().height(); if (th > 0) h -= th; } catch (e) {}
+      return { w, h };
+    }
+    function rgba(hex, a) {
+      const m = /^#?([0-9a-f]{6})$/i.exec(hex || '');
+      if (!m) return `rgba(245,158,11,${a})`;
+      const n = parseInt(m[1], 16);
+      return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${a})`;
+    }
+    function fmtDur(sec) {
+      sec = Math.abs(sec);
+      if (sec >= 86400 * 2) return `${Math.round(sec / 86400)}d`;
+      if (sec >= 3600) return `${(sec / 3600).toFixed(1)}h`;
+      return `${Math.round(sec / 60)}m`;
+    }
+
+    // ---- geometry helpers for hit-testing ----
+    function segDist(px, py, a, b, clampEnd = true, clampStart = true) {
+      const dx = b.x - a.x, dy = b.y - a.y, len2 = dx * dx + dy * dy;
+      let t = len2 ? ((px - a.x) * dx + (py - a.y) * dy) / len2 : 0;
+      if (clampStart) t = Math.max(0, t);
+      if (clampEnd) t = Math.min(1, t);
+      return Math.hypot(px - (a.x + t * dx), py - (a.y + t * dy));
+    }
+    function channelOffset(P) {
+      const dx = P[1].x - P[0].x;
+      if (!P[2] || Math.abs(dx) < 1e-6) return 0;
+      return P[2].y - (P[0].y + (P[1].y - P[0].y) * (P[2].x - P[0].x) / dx);
+    }
+    function textBox(d, P) {
+      scratchCtx.font = '12px ui-monospace, Menlo, Consolas, monospace';
+      const w = scratchCtx.measureText(d.text || '').width + 10;
+      return { x: P[0].x, y: P[0].y - 9, w, h: 18 };
+    }
+    function onBody(d, P, x, y) {
+      const T = 6;
+      switch (d.type) {
+        case 'trend': return segDist(x, y, P[0], P[1]) <= T;
+        case 'ray': return segDist(x, y, P[0], P[1], false, true) <= T;
+        case 'hline': return Math.abs(y - P[0].y) <= T;
+        case 'vline': return Math.abs(x - P[0].x) <= T;
+        case 'rect': {
+          const x1 = Math.min(P[0].x, P[1].x), x2 = Math.max(P[0].x, P[1].x);
+          const y1 = Math.min(P[0].y, P[1].y), y2 = Math.max(P[0].y, P[1].y);
+          const inX = x >= x1 - T && x <= x2 + T, inY = y >= y1 - T && y <= y2 + T;
+          return (inY && (Math.abs(x - x1) <= T || Math.abs(x - x2) <= T)) || (inX && (Math.abs(y - y1) <= T || Math.abs(y - y2) <= T));
+        }
+        case 'measure': {
+          const x1 = Math.min(P[0].x, P[1].x), x2 = Math.max(P[0].x, P[1].x);
+          const y1 = Math.min(P[0].y, P[1].y), y2 = Math.max(P[0].y, P[1].y);
+          return x >= x1 && x <= x2 && y >= y1 && y <= y2;
+        }
+        case 'fib': {
+          const minX = Math.min(P[0].x, P[1].x) - T;
+          if (x < minX) return false;
+          return FIB_LEVELS.some(l => Math.abs(y - (P[1].y + (P[0].y - P[1].y) * l)) <= T);
+        }
+        case 'channel': {
+          const off = channelOffset(P);
+          const a2 = { x: P[0].x, y: P[0].y + off }, b2 = { x: P[1].x, y: P[1].y + off };
+          return segDist(x, y, P[0], P[1]) <= T || segDist(x, y, a2, b2) <= T;
+        }
+        case 'rr': {
+          const x1 = Math.min(P[0].x, P[1].x), x2 = Math.max(P[0].x, P[1].x);
+          const ys = [P[0].y, P[1].y, P[2].y];
+          return x >= x1 - T && x <= x2 + T && y >= Math.min(...ys) - T && y <= Math.max(...ys) + T;
+        }
+        case 'text': {
+          const bb = textBox(d, P);
+          return x >= bb.x && x <= bb.x + bb.w && y >= bb.y && y <= bb.y + bb.h;
+        }
+      }
+      return false;
+    }
+    function hitTest(x, y) {
+      for (let i = drawings.length - 1; i >= 0; i--) {
+        const d = drawings[i];
+        const P = d.pts.map(toXY);
+        if (P.some(p => !p)) continue;
+        if (d.id === selectedId) {
+          for (let k = 0; k < P.length; k++) if (Math.hypot(P[k].x - x, P[k].y - y) <= 9) return { id: d.id, part: k };
+        }
+        if (onBody(d, P, x, y)) return { id: d.id, part: 'body' };
+      }
+      return null;
+    }
+
+    // ---- rendering ----
+    function drawOne(ctx, d, ps, isDraft) {
+      const P = d.pts.map(toXY);
+      if (P.some(p => !p)) return;
+      const col = d.color || '#f59e0b';
+      ctx.lineWidth = d.width || 2;
+      ctx.strokeStyle = col;
+      ctx.fillStyle = col;
+      ctx.setLineDash(d.dash ? [7, 5] : []);
+      ctx.lineCap = 'round';
+      const line = (a, b) => { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); };
+      const tag = (txt, x, y, bg, align) => {
+        ctx.save(); ctx.setLineDash([]);
+        ctx.font = '11px ui-monospace, Menlo, Consolas, monospace';
+        const w = ctx.measureText(txt).width + 8;
+        const bx = align === 'right' ? x - w : x;
+        ctx.fillStyle = bg; ctx.fillRect(bx, y - 8, w, 16);
+        ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle'; ctx.fillText(txt, bx + 4, y);
+        ctx.restore();
+      };
+      switch (d.type) {
+        case 'trend': line(P[0], P[1]); break;
+        case 'ray': {
+          const dx = P[1].x - P[0].x, dy = P[1].y - P[0].y, len = Math.hypot(dx, dy);
+          if (len < 1) break;
+          const k = 6000 / len;
+          line(P[0], { x: P[0].x + dx * k, y: P[0].y + dy * k });
+          break;
+        }
+        case 'hline':
+          line({ x: 0, y: P[0].y }, { x: ps.w, y: P[0].y });
+          tag(d.pts[0].p.toFixed(2), ps.w - 2, P[0].y, rgba(col, 0.9), 'right');
+          break;
+        case 'vline':
+          line({ x: P[0].x, y: 0 }, { x: P[0].x, y: ps.h });
+          tag(fmtBarTime(d.pts[0].t, $('timeframeSelect').value), Math.min(P[0].x + 4, ps.w - 100), 12, rgba(col, 0.9));
+          break;
+        case 'rect':
+          ctx.fillStyle = rgba(col, 0.13);
+          ctx.fillRect(Math.min(P[0].x, P[1].x), Math.min(P[0].y, P[1].y), Math.abs(P[1].x - P[0].x), Math.abs(P[1].y - P[0].y));
+          ctx.strokeRect(Math.min(P[0].x, P[1].x), Math.min(P[0].y, P[1].y), Math.abs(P[1].x - P[0].x), Math.abs(P[1].y - P[0].y));
+          break;
+        case 'fib': {
+          const x1 = Math.min(P[0].x, P[1].x), x2 = ps.w;
+          const ys = FIB_LEVELS.map(l => P[1].y + (P[0].y - P[1].y) * l);
+          for (let i = 0; i < FIB_LEVELS.length - 1; i++) {
+            ctx.fillStyle = rgba(FIB_COLORS[i + 1], 0.07);
+            ctx.fillRect(x1, Math.min(ys[i], ys[i + 1]), x2 - x1, Math.abs(ys[i + 1] - ys[i]));
+          }
+          FIB_LEVELS.forEach((l, i) => {
+            ctx.strokeStyle = FIB_COLORS[i]; ctx.setLineDash(l === 0 || l === 1 ? [] : [5, 4]);
+            line({ x: x1, y: ys[i] }, { x: x2, y: ys[i] });
+            const price = d.pts[1].p + (d.pts[0].p - d.pts[1].p) * l;
+            ctx.save(); ctx.setLineDash([]); ctx.fillStyle = FIB_COLORS[i];
+            ctx.font = '11px ui-monospace, Menlo, Consolas, monospace'; ctx.textBaseline = 'bottom';
+            ctx.fillText(`${l} (${price.toFixed(2)})`, x1 + 4, ys[i] - 2);
+            ctx.restore();
+          });
+          ctx.strokeStyle = rgba(col, 0.6); ctx.setLineDash([3, 4]);
+          line(P[0], P[1]);
+          break;
+        }
+        case 'channel': {
+          line(P[0], P[1]);
+          if (isDraft && d.stage === 1) break;
+          const off = channelOffset(P);
+          const a2 = { x: P[0].x, y: P[0].y + off }, b2 = { x: P[1].x, y: P[1].y + off };
+          ctx.save(); ctx.fillStyle = rgba(col, 0.1);
+          ctx.beginPath(); ctx.moveTo(P[0].x, P[0].y); ctx.lineTo(P[1].x, P[1].y); ctx.lineTo(b2.x, b2.y); ctx.lineTo(a2.x, a2.y); ctx.closePath(); ctx.fill(); ctx.restore();
+          line(a2, b2);
+          ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
+          line({ x: P[0].x, y: P[0].y + off / 2 }, { x: P[1].x, y: P[1].y + off / 2 });
+          break;
+        }
+        case 'measure': {
+          const up = d.pts[1].p >= d.pts[0].p;
+          const c = up ? '#10b981' : '#ef4444';
+          ctx.fillStyle = rgba(c, 0.14); ctx.strokeStyle = c;
+          ctx.fillRect(Math.min(P[0].x, P[1].x), Math.min(P[0].y, P[1].y), Math.abs(P[1].x - P[0].x), Math.abs(P[1].y - P[0].y));
+          ctx.setLineDash([]); line(P[0], P[1]);
+          const delta = d.pts[1].p - d.pts[0].p;
+          const pct = d.pts[0].p ? (delta / d.pts[0].p) * 100 : 0;
+          const bars = Math.round(Math.abs(timeToLogical(d.pts[1].t) - timeToLogical(d.pts[0].t)));
+          const txt = `${delta >= 0 ? '+' : ''}${delta.toFixed(2)} (${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%)  ${bars} bars · ${fmtDur(d.pts[1].t - d.pts[0].t)}`;
+          tag(txt, Math.max(4, Math.min((P[0].x + P[1].x) / 2 - 80, ps.w - 260)), up ? Math.min(P[0].y, P[1].y) - 14 : Math.max(P[0].y, P[1].y) + 14, rgba(c, 0.9));
+          break;
+        }
+        case 'rr': {
+          const xa = Math.min(P[0].x, P[1].x), xb = Math.max(P[0].x, P[1].x), w = xb - xa;
+          const yE = P[0].y, yS = P[1].y, yT = P[2].y;
+          const entry = d.pts[0].p, stop = d.pts[1].p, tgt = d.pts[2].p;
+          const risk = Math.abs(entry - stop), reward = Math.abs(tgt - entry), rr = risk > 0 ? reward / risk : 0;
+          const pc = v => `${v >= entry ? '+' : ''}${(((v - entry) / entry) * 100).toFixed(2)}%`;
+          ctx.setLineDash([]);
+          ctx.fillStyle = rgba('#10b981', 0.16); ctx.fillRect(xa, Math.min(yE, yT), w, Math.abs(yT - yE));
+          ctx.fillStyle = rgba('#ef4444', 0.16); ctx.fillRect(xa, Math.min(yE, yS), w, Math.abs(yS - yE));
+          ctx.strokeStyle = '#10b981'; line({ x: xa, y: yT }, { x: xb, y: yT });
+          ctx.strokeStyle = '#ef4444'; line({ x: xa, y: yS }, { x: xb, y: yS });
+          ctx.strokeStyle = col; line({ x: xa, y: yE }, { x: xb, y: yE });
+          tag(`TP ${tgt.toFixed(2)} (${pc(tgt)})`, xa + 4, yT + (yT < yE ? 10 : -10), rgba('#10b981', 0.9));
+          tag(`SL ${stop.toFixed(2)} (${pc(stop)})`, xa + 4, yS + (yS > yE ? -10 : 10), rgba('#ef4444', 0.9));
+          tag(`Entry ${entry.toFixed(2)}`, xa + 4, yE, rgba('#475569', 0.95));
+          tag(`R/R ${rr.toFixed(2)}`, xb - 4, yE, rgba('#3b82f6', 0.95), 'right');
+          break;
+        }
+        case 'text': {
+          const bb = textBox(d, P);
+          ctx.save(); ctx.setLineDash([]);
+          ctx.fillStyle = rgba(col, 0.9); ctx.fillRect(bb.x, bb.y, bb.w, bb.h);
+          ctx.fillStyle = '#0b0f17'; ctx.font = '12px ui-monospace, Menlo, Consolas, monospace'; ctx.textBaseline = 'middle';
+          ctx.fillText(d.text || '', bb.x + 5, bb.y + bb.h / 2);
+          ctx.restore();
+          break;
+        }
+      }
+      ctx.setLineDash([]);
+    }
+
+    function drawAll(ctx, list, opts) {
+      const ps = plotSize();
+      ctx.save();
+      ctx.beginPath(); ctx.rect(0, 0, ps.w, ps.h); ctx.clip();
+      list.forEach(d => { ctx.save(); drawOne(ctx, d, ps, d === draft); ctx.restore(); });
+      ctx.restore();
+      if (opts.handles && opts.selected) {
+        const d = list.find(x => x.id === opts.selected);
+        if (d) d.pts.map(toXY).forEach(p => {
+          if (!p) return;
+          ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+          ctx.fillStyle = '#0f172a'; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke();
+        });
+      }
+    }
+
+    function renderDrawings() {
+      const canvas = $('drawCanvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+      if (!mainChartInstance || !candleSeries || !rawBars.length || !drawVisible) return;
+      drawAll(ctx, draft ? drawings.concat([draft]) : drawings, { handles: true, selected: selectedId });
+    }
+
+    // Redraw overlays whenever the visible range / price scale / size changes (covers wheel, drag, autoscale).
+    function drawTick() {
+      requestAnimationFrame(drawTick);
+      if (document.hidden || !mainChartInstance || !candleSeries) return;
+      let sig;
+      try {
+        const r = mainChartInstance.timeScale().getVisibleLogicalRange();
+        sig = [r && r.from, r && r.to, candleSeries.priceToCoordinate(1), candleSeries.priceToCoordinate(1000),
+          $('chartContainer').clientWidth, rawBars.length, drawings.length, selectedId, drawVisible,
+          draft ? JSON.stringify(draft.pts) : ''].join('|');
+      } catch (e) { return; }
+      if (sig !== lastSig) { lastSig = sig; renderDrawings(); renderCloudOverlay(); }
+    }
+
+    // ---- tool state & UI ----
+    function setTool(t) {
+      tool = t;
+      draft = null;
+      document.querySelectorAll('#drawToolbar [data-tool]').forEach(b => {
+        const on = b.getAttribute('data-tool') === t;
+        b.classList.toggle('bg-blue-600', on);
+        b.classList.toggle('text-white', on);
+        b.classList.toggle('bg-gray-700', !on);
+        b.classList.toggle('text-gray-200', !on);
+      });
+      $('chartContainer').classList.toggle('tool-active', t !== 'cursor');
+      renderDrawings();
+    }
+    function syncDrawUI() {
+      const d = drawings.find(x => x.id === selectedId);
+      if (d) {
+        $('drawColor').value = d.color || '#f59e0b';
+        $('drawWidth').value = String(d.width || 2);
+        $('drawDash').value = d.dash ? '1' : '0';
+      }
+    }
+    function applyStyleToSelected() {
+      const d = drawings.find(x => x.id === selectedId);
+      if (!d) return;
+      pushUndo();
+      d.color = $('drawColor').value; d.width = parseInt($('drawWidth').value) || 2; d.dash = $('drawDash').value === '1';
+      persistDrawings(); renderDrawings();
+    }
+    function deleteSelected() {
+      if (!selectedId) return;
+      pushUndo();
+      drawings = drawings.filter(d => d.id !== selectedId);
+      selectedId = null; persistDrawings(); renderDrawings();
+    }
+    function undoDrawing() {
+      if (!undoStack.length) return;
+      drawings = JSON.parse(undoStack.pop());
+      if (!drawings.some(d => d.id === selectedId)) selectedId = null;
+      persistDrawings(); renderDrawings();
+    }
+
+    function finishDraft() {
+      const d = draft;
+      draft = null;
+      const clean = { id: d.id, type: d.type, pts: d.pts.slice(0, TOOL_POINTS[d.type]), color: d.color, width: d.width, dash: d.dash };
+      if (d.text) clean.text = d.text;
+      pushUndo();
+      drawings.push(clean);
+      selectedId = clean.id;
+      persistDrawings();
+      if (!$('drawStay').checked) setTool('cursor');
+      syncDrawUI(); renderDrawings();
+    }
+
+    function toolDown(x, y) {
+      const need = TOOL_POINTS[tool];
+      const pt = snapPoint(x, y);
+      const style = { color: $('drawColor').value, width: parseInt($('drawWidth').value) || 2, dash: $('drawDash').value === '1' };
+      if ((tool === 'rrlong' || tool === 'rrshort') && pt) {
+        draft = { id: newId(), type: 'rr', pts: makeRR(pt, tool === 'rrlong'), ...style };
+        finishDraft();
+        return;
+      }
+      if (!need || !pt) return;
+      if (need === 1) {
+        let text;
+        if (tool === 'text') {
+          text = prompt('Label text:');
+          if (!text) return;
+        }
+        draft = { id: newId(), type: tool, pts: [pt], ...style, text };
+        finishDraft();
+        return;
+      }
+      if (!draft) {
+        draft = { id: newId(), type: tool, pts: need === 3 ? [pt, pt, pt] : [pt, pt], ...style, stage: 1, dragging: true, downXY: { x, y } };
+      } else if (draft.stage === 1) {
+        draft.pts[1] = pt;
+        if (need === 3) { draft.pts[2] = pt; draft.stage = 2; draft.dragging = false; } else finishDraft();
+      } else if (draft.stage === 2) {
+        draft.pts[2] = pt;
+        finishDraft();
+      }
+      renderDrawings();
+    }
+
+    function beginDrag(hit, x, y) {
+      const d = drawings.find(v => v.id === hit.id);
+      dragState = { id: hit.id, part: hit.part, orig: JSON.parse(JSON.stringify(d.pts)), pre: JSON.stringify(drawings), start: fromXY(x, y), moved: false };
+    }
+
+    function pointerMove(x, y) {
+      if (draft) {
+        const pt = snapPoint(x, y);
+        if (pt) {
+          if (draft.stage === 2) draft.pts[2] = pt;
+          else { draft.pts[1] = pt; if (draft.pts.length === 3) draft.pts[2] = pt; }
+          renderDrawings();
+        }
+        return;
+      }
+      if (dragState) {
+        const d = drawings.find(v => v.id === dragState.id);
+        if (!d) return;
+        dragState.moved = true;
+        if (dragState.part === 'body') {
+          const cur = fromXY(x, y);
+          if (!cur || !dragState.start) return;
+          const dl = cur.l - dragState.start.l, dp = cur.p - dragState.start.p;
+          d.pts = dragState.orig.map(o => ({ t: logicalToTime(timeToLogical(o.t) + dl), p: o.p + dp }));
+        } else {
+          const pt = snapPoint(x, y);
+          if (pt) { d.pts[dragState.part] = pt; if (d.type === 'rr') normalizeRR(d, dragState.part); }
+        }
+        renderDrawings();
+        return;
+      }
+      // hover feedback in cursor mode
+      if (tool === 'cursor' && rawBars.length) {
+        $('chartContainer').classList.toggle('tool-hover', !!(inPlot(x, y) && hitTest(x, y)));
+      }
+    }
+
+    function pointerUp(x, y) {
+      if (draft && draft.dragging) {
+        draft.dragging = false;
+        const moved = Math.hypot(x - draft.downXY.x, y - draft.downXY.y) > 6;
+        if (moved) {
+          const pt = snapPoint(x, y);
+          if (pt) draft.pts[1] = pt;
+          if (draft.pts.length === 3) { draft.pts[2] = draft.pts[1]; draft.stage = 2; renderDrawings(); }
+          else finishDraft();
+        }
+        return;
+      }
+      if (dragState) {
+        if (dragState.moved) { undoStack.push(dragState.pre); persistDrawings(); }
+        dragState = null;
+      }
+    }
+
+    const chartBox = $('chartContainer');
+    function evXY(e) {
+      const r = chartBox.getBoundingClientRect();
+      const t = (e.touches && e.touches[0]) || (e.changedTouches && e.changedTouches[0]) || e;
+      return { x: t.clientX - r.left, y: t.clientY - r.top };
+    }
+    function inPlot(x, y) {
+      const ps = plotSize();
+      return x >= 0 && y >= 0 && x <= ps.w && y <= ps.h;
+    }
+    function downHandler(e) {
+      if (!candleSeries || !rawBars.length) return;
+      if (e.type === 'mousedown' && e.button !== 0) return;
+      const { x, y } = evXY(e);
+      if (!inPlot(x, y)) return;
+      if (tool !== 'cursor') { e.stopPropagation(); e.preventDefault(); toolDown(x, y); return; }
+      const hit = hitTest(x, y);
+      if (hit) {
+        e.stopPropagation(); e.preventDefault();
+        selectedId = hit.id;
+        beginDrag(hit, x, y);
+        syncDrawUI(); renderDrawings();
+      } else if (selectedId) {
+        selectedId = null; renderDrawings();
+      }
+    }
+    chartBox.addEventListener('mousedown', downHandler, true);
+    chartBox.addEventListener('touchstart', downHandler, { capture: true, passive: false });
+    document.addEventListener('mousemove', e => { const p = evXY(e); pointerMove(p.x, p.y); });
+    document.addEventListener('touchmove', e => {
+      if (draft || dragState) { e.preventDefault(); const p = evXY(e); pointerMove(p.x, p.y); }
+    }, { passive: false });
+    document.addEventListener('mouseup', e => { const p = evXY(e); pointerUp(p.x, p.y); });
+    document.addEventListener('touchend', e => { const p = evXY(e); pointerUp(p.x, p.y); });
+    chartBox.addEventListener('mouseleave', () => chartBox.classList.remove('tool-hover'));
+    chartBox.addEventListener('dblclick', e => {
+      if (tool !== 'cursor') return;
+      const { x, y } = evXY(e);
+      const hit = hitTest(x, y);
+      const d = hit && drawings.find(v => v.id === hit.id);
+      if (d && d.type === 'text') {
+        const t = prompt('Edit label text:', d.text || '');
+        if (t) { pushUndo(); d.text = t; persistDrawings(); renderDrawings(); }
+      }
+    }, true);
+
+    document.querySelectorAll('#drawToolbar [data-tool]').forEach(b =>
+      b.addEventListener('click', () => {
+        if (!rawBars.length) { alert('Load candles first (watchlist symbol or sample data), then draw.'); return; }
+        setTool(b.getAttribute('data-tool'));
+      }));
+    ['drawColor', 'drawWidth', 'drawDash'].forEach(id => $(id).addEventListener('change', applyStyleToSelected));
+    $('drawUndoBtn').addEventListener('click', undoDrawing);
+    $('drawDeleteBtn').addEventListener('click', deleteSelected);
+    $('drawClearBtn').addEventListener('click', () => {
+      if (!drawings.length) return;
+      if (!confirm('Delete all drawings on this symbol / timeframe?')) return;
+      pushUndo(); drawings = []; selectedId = null; persistDrawings(); renderDrawings();
+    });
+    $('drawVisibleBtn').addEventListener('click', () => {
+      drawVisible = !drawVisible;
+      $('drawVisibleBtn').textContent = drawVisible ? 'Hide' : 'Show';
+      renderDrawings();
+    });
+    document.addEventListener('keydown', e => {
+      if (/^(INPUT|TEXTAREA|SELECT)$/.test((e.target.tagName || ''))) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') { if (selectedId) { e.preventDefault(); deleteSelected(); } }
+      else if (e.key === 'Escape') { draft = null; selectedId = null; setTool('cursor'); }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undoDrawing(); }
+    });
+
+    // ---- right-side space ----
+    function rightSpaceVal() {
+      const v = parseInt($('rightSpace').value);
+      return Number.isFinite(v) ? Math.max(0, Math.min(200, v)) : 12;
+    }
+    $('rightSpace').value = (() => { try { return localStorage.getItem('avwap_right_space') || '12'; } catch (e) { return '12'; } })();
+    $('rightSpace').addEventListener('change', () => {
+      const n = rightSpaceVal();
+      try { localStorage.setItem('avwap_right_space', String(n)); } catch (e) {}
+      if (mainChartInstance) {
+        mainChartInstance.timeScale().applyOptions({ rightOffset: n });
+        mainChartInstance.timeScale().scrollToPosition(n, false);
+      }
+    });
+    // called after a symbol/timeframe is shown: set drawings + reserve the right-side space
+    function afterShow(rec) {
+      loadDrawingsFor(rec.symbol, rec.timeframe);
+      const key = `${rec.symbol}|${rec.timeframe}`;
+      if (key !== lastViewKey && mainChartInstance) {
+        lastViewKey = key;
+        mainChartInstance.timeScale().scrollToPosition(rightSpaceVal(), false);
+      }
+    }
+
+    // ---- export image (chart + cloud + AVWAP + drawings, with a title strip) ----
+    function buildExportCanvas() {
+      if (!mainChartInstance || !rawBars.length) throw new Error('Nothing to export — load candles first.');
+      const shot = mainChartInstance.takeScreenshot();
+      const W = shot.width, H = shot.height;
+      const scale = W / (parseFloat($('drawCanvas').style.width) || W);
+      const head = Math.round(30 * scale);
+      const out = document.createElement('canvas');
+      out.width = W; out.height = H + head;
+      const ctx = out.getContext('2d');
+      ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, out.width, out.height);
+      ctx.drawImage(shot, 0, head);
+      const cloud = $('cloudOverlayCanvas');
+      ctx.drawImage(cloud, 0, head, W, H);
+      if (drawVisible && drawings.length) {
+        const tmp = document.createElement('canvas');
+        tmp.width = W; tmp.height = H;
+        const tctx = tmp.getContext('2d');
+        tctx.setTransform(scale, 0, 0, scale, 0, 0);
+        drawAll(tctx, drawings, { handles: false });
+        ctx.drawImage(tmp, 0, head);
+      }
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = `bold ${Math.round(13 * scale)}px ui-monospace, Menlo, Consolas, monospace`;
+      ctx.textBaseline = 'middle';
+      const sym = $('symbolInput').value.trim().toUpperCase();
+      ctx.fillText(`${sym}  •  ${$('timeframeSelect').value}  •  ${rawBars.length} bars`, 10 * scale, head / 2);
+      ctx.fillStyle = '#94a3b8';
+      ctx.font = `${Math.round(11 * scale)}px ui-monospace, Menlo, Consolas, monospace`;
+      const stats = `Trades ${$('metricTrades').innerText}  Win ${$('metricWinRate').innerText}  Return ${$('metricReturn').innerText}  PF ${$('metricPF').innerText}`;
+      ctx.textAlign = 'right';
+      ctx.fillText(stats, W - 10 * scale, head / 2);
+      ctx.textAlign = 'left';
+      return out;
+    }
+    $('exportPngBtn').addEventListener('click', () => {
+      try {
+        buildExportCanvas().toBlob(blob => {
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = `${$('symbolInput').value.trim().toUpperCase() || 'chart'}_${$('timeframeSelect').value}_${new Date().toISOString().slice(0, 10)}.png`;
+          a.click();
+          setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+        }, 'image/png');
+      } catch (e) { alert(e.message); }
+    });
+    $('copyPngBtn').addEventListener('click', () => {
+      try {
+        buildExportCanvas().toBlob(async blob => {
+          try {
+            await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+            setStatus('Chart image copied to clipboard', 'green');
+          } catch (err) { alert('Clipboard copy is blocked in this browser/context — use the PNG button instead.'); }
+        }, 'image/png');
+      } catch (e) { alert(e.message); }
+    });
+
+    function mobPlayText(t) { const b = $('mobPlay'); if (b) b.textContent = t; }
+    $('mobPrev').addEventListener('click', () => stepSymbol(-1));
+    $('mobNext').addEventListener('click', () => stepSymbol(1));
+    $('mobPlay').addEventListener('click', () => $('playToggleBtn').click());
+    // Panels: open on desktop, collapsed on phones/tablets
+    if (window.matchMedia('(min-width: 1024px)').matches) {
+      $('cfgDetails').open = true; $('wlEditDetails').open = true;
+    }
+    {
+      const sym = $('symbolInput').value.trim().toUpperCase(); const ms = $('mobSym'); if (ms) ms.textContent = sym || '—';
+    }
+    setTool('cursor');
+    requestAnimationFrame(drawTick);
+
+    // ---- Auto-fit toggle (remembered) ----
+    try { $('autoFitPrice').checked = localStorage.getItem('avwap_autofit') !== '0'; } catch (e) {}
+    $('autoFitPrice').addEventListener('change', () => {
+      try { localStorage.setItem('avwap_autofit', $('autoFitPrice').checked ? '1' : '0'); } catch (e) {}
+      applyAutoFit();
+    });
+    applyAutoFit();
+
+    // ---- PWA: service worker + install button ----
+    if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    }
+    let deferredInstall = null;
+    window.addEventListener('beforeinstallprompt', e => {
+      e.preventDefault();
+      deferredInstall = e;
+      const b = document.createElement('button');
+      b.id = 'installBtn';
+      b.textContent = '⬇ Install app';
+      b.className = 'bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3 py-1 rounded text-xs';
+      b.addEventListener('click', async () => {
+        deferredInstall.prompt();
+        await deferredInstall.userChoice.catch(() => {});
+        deferredInstall = null;
+        b.remove();
+      });
+      document.querySelector('header').appendChild(b);
+    });
+    window.addEventListener('appinstalled', () => { const b = $('installBtn'); if (b) b.remove(); });
+
+    function resizeDrawCanvas() {
+      const c = $('drawCanvas'), box = $('chartContainer');
+      if (!c || !box) return;
+      const r = box.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+      c.width = r.width * dpr; c.height = r.height * dpr;
+      c.style.width = r.width + 'px'; c.style.height = r.height + 'px';
+      renderDrawings();
+    }
+
+    // ---- Big background watermark: symbol + timeframe (also appears in exported PNGs) ----
+    const TF_SHORT = { '1Day': '1D', '1Hour': '1H', '15Min': '15m', '5Min': '5m' };
+    let wmText = '';
+    function updateWatermark(symbol, timeframe) {
+      if (symbol) wmText = `${String(symbol).toUpperCase()} · ${TF_SHORT[timeframe] || timeframe}`;
+      if (!mainChartInstance) return;
+      const w = $('chartContainer').clientWidth || 800;
+      mainChartInstance.applyOptions({
+        watermark: {
+          visible: !!wmText, text: wmText,
+          fontSize: Math.round(Math.max(40, Math.min(110, w / 9))),
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+          color: 'rgba(148, 163, 184, 0.14)',
+          horzAlign: 'center', vertAlign: 'center'
+        }
+      });
+    }
+    window.addEventListener('resize', () => updateWatermark());
+
+    // ---- Save / load drawings as JSON ----
+    function downloadJSON(obj, filename) {
+      const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    }
+    function sanitizeDrawing(d) {
+      if (!d || !TOOL_POINTS[d.type] || !Array.isArray(d.pts) || d.pts.length < TOOL_POINTS[d.type]) return null;
+      const pts = d.pts.slice(0, TOOL_POINTS[d.type]).map(q => ({ t: Number(q && q.t), p: Number(q && q.p) }));
+      if (pts.some(q => !Number.isFinite(q.t) || !Number.isFinite(q.p))) return null;
+      const out = {
+        id: typeof d.id === 'string' && d.id ? d.id.slice(0, 40) : newId(),
+        type: d.type, pts,
+        color: /^#[0-9a-f]{6}$/i.test(d.color || '') ? d.color : '#f59e0b',
+        width: Math.max(1, Math.min(6, parseInt(d.width) || 2)),
+        dash: !!d.dash
+      };
+      if (d.type === 'text') out.text = String(d.text || '').slice(0, 200);
+      return out;
+    }
+    $('drawSaveBtn').addEventListener('click', () => {
+      if (!drawKeyCur || !drawings.length) { alert('No drawings on this chart to save.'); return; }
+      persistDrawings();
+      const [sym, tf] = drawKeyCur.split('|');
+      downloadJSON({ app: 'avwap-drawings', version: 1, exportedAt: new Date().toISOString(), charts: { [drawKeyCur]: drawings } },
+        `drawings_${sym}_${tf}_${new Date().toISOString().slice(0, 10)}.json`);
+    });
+    $('drawSaveAllBtn').addEventListener('click', () => {
+      persistDrawings();
+      if (!Object.keys(drawStore).length) { alert('No drawings saved yet.'); return; }
+      downloadJSON({ app: 'avwap-drawings', version: 1, exportedAt: new Date().toISOString(), charts: drawStore },
+        `drawings_all_${new Date().toISOString().slice(0, 10)}.json`);
+    });
+    $('drawLoadBtn').addEventListener('click', () => $('drawLoadFile').click());
+    $('drawLoadFile').addEventListener('change', async e => {
+      const f = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!f) return;
+      try {
+        const data = JSON.parse(await f.text());
+        const charts = data && data.charts && typeof data.charts === 'object' ? data.charts : null;
+        if (!charts) throw new Error('Not a drawings file (missing "charts").');
+        persistDrawings();
+        let added = 0, skipped = 0;
+        for (const key of Object.keys(charts)) {
+          if (!/^[^|]+\|[^|]+$/.test(key) || !Array.isArray(charts[key])) continue;
+          const list = drawStore[key] ? drawStore[key].slice() : [];
+          const ids = new Set(list.map(x => x.id));
+          charts[key].forEach(raw => {
+            const d = sanitizeDrawing(raw);
+            if (!d) { skipped++; return; }
+            if (ids.has(d.id)) d.id = newId();
+            ids.add(d.id); list.push(d); added++;
+          });
+          if (list.length) drawStore[key] = list;
+        }
+        try { localStorage.setItem(DRAW_KEY, JSON.stringify(drawStore)); } catch (err) {}
+        if (drawKeyCur && drawStore[drawKeyCur]) { pushUndo(); drawings = JSON.parse(JSON.stringify(drawStore[drawKeyCur])); }
+        renderDrawings();
+        setStatus(`Imported ${added} drawings${skipped ? ` (${skipped} skipped)` : ''} from ${f.name}`, added ? 'green' : 'amber');
+      } catch (err) {
+        alert(`Could not import drawings: ${err.message}`);
+      }
+    });
+
+    // ---- Risk / Reward box (entry, stop, target) ----
+    function makeRR(pt, long) {
+      const a = calculateATR(rawBars, 14);
+      let atr = a[a.length - 1];
+      if (!Number.isFinite(atr) || atr <= 0) atr = pt.p * 0.02;
+      const dir = long ? 1 : -1, risk = atr * 1.5;
+      const endT = logicalToTime(timeToLogical(pt.t) + 15);
+      return [
+        { t: pt.t, p: pt.p },
+        { t: endT, p: Math.max(0.0001, pt.p - dir * risk) },
+        { t: endT, p: Math.max(0.0001, pt.p + dir * risk * 2) }
+      ];
+    }
+    // stop and target share the box's right edge; the right edge stays right of the entry
+    function normalizeRR(d, part) {
+      if (part === 1) d.pts[2].t = d.pts[1].t;
+      if (part === 2) d.pts[1].t = d.pts[2].t;
+      const minEnd = d.pts[0].t + barStep();
+      if (d.pts[1].t < minEnd) { d.pts[1].t = minEnd; d.pts[2].t = minEnd; }
+    }
+  </script>
+</body>
+</html>

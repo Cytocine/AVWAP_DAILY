@@ -326,7 +326,7 @@
         <label class="flex items-center gap-1.5" title="Daily bullish + 30m EMA10 &gt; EMA20 + an option contract above the volume threshold"><input id="wlSetupOnly" type="checkbox" class="accent-green-500"> Setups only</label>
         <label class="flex items-center gap-1.5" title="Only show symbols where FastEMA crossed above AVWAP (close above AVWAP) within the last N bars"><input id="wlBuyOnly" type="checkbox" class="accent-green-500"> AVWAP buy within <input id="buyBars" type="number" min="1" max="100" value="5" class="w-12 px-1 py-0.5 rounded"> bars</label>
         <label class="flex items-center gap-1.5" title="After Update All finishes, scan 30m + options for the daily-bullish symbols"><input id="scanAfterUpdate" type="checkbox" class="accent-green-500" checked> Auto-scan after Update All</label>
-        <button id="wlCsvBtn" type="button" class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-2 py-0.5 rounded text-xs">CSV</button>
+        <button id="wlCsvBtn" type="button" class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-2 py-0.5 rounded text-xs" title="Download the symbols shown in the table, one per line">CSV</button>
       </div>
       <div id="wlTableWrap" tabindex="0" class="overflow-x-auto scroll-dark max-h-64 overflow-y-auto" style="outline:none">
         <table class="w-full text-left text-xs">
@@ -1505,22 +1505,11 @@
       return ok;
     }
 
+    // Download the symbols currently shown in the table (respects every filter), one per line
     function exportTableCsv() {
-      const q = v => { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
-      const rows = [['Symbol', 'Cached bars', 'Last bar', 'Close', 'vs AVWAP %', 'Daily state', '30m EMA10', '30m EMA20', '30m EMA10>EMA20',
-        'Option max volume', 'Option contract', 'Setup', 'AVWAP buy bars ago']];
-      for (const sym of visibleSymbols()) {
-        const i = rowInfo.get(sym), st = i && i.state, sc = optScan.get(sym) || {}, ss = setupState(sym);
-        rows.push([sym, i ? i.n : '', i ? fmtBarTime(i.last, i.timeframe) : '', st ? st.close.toFixed(2) : '', st ? st.pct.toFixed(2) : '',
-          st ? (st.bull ? 'Bullish' : 'Neutral/Bear') : '', sc.e10 != null ? sc.e10.toFixed(2) : '', sc.e20 != null ? sc.e20.toFixed(2) : '',
-          sc.bull30 == null ? '' : (sc.bull30 ? 'yes' : 'no'), sc.optVol == null ? '' : sc.optVol, sc.optSym || '', ss.all ? 'YES' : '', st && st.buyAge != null ? st.buyAge : '']);
-      }
-      const blob = new Blob([rows.map(r => r.map(q).join(',')).join('\n')], { type: 'text/csv' });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = `watchlist_scan_${new Date().toISOString().slice(0, 10)}.csv`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      const syms = visibleSymbols();
+      if (!syms.length) { alert('No symbols in the table to download.'); return; }
+      downloadText(`watchlist_symbols_${new Date().toISOString().slice(0, 10)}.csv`, syms.join('\n') + '\n', 'text/csv');
     }
 
     // =====================================================================

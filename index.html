@@ -447,6 +447,7 @@
       <button id="drawLoadBtn" title="Import drawings from a JSON file (merged with existing)" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">Load JSON</button>
       <input id="drawLoadFile" type="file" accept=".json,application/json" class="hidden">
       <span class="text-gray-700">|</span>
+      <label class="flex items-center gap-1 text-xs text-gray-400" title="Show the floating options box on the chart (hidden by default on phones)"><input id="optBoxChk" type="checkbox" class="accent-cyan-500"> Options box</label>
       <label class="flex items-center gap-1 text-xs text-gray-400" title="Mark every scanner signal on the chart: FastEMA crosses above AVWAP with close above AVWAP"><input id="chartBuyMarks" type="checkbox" class="accent-yellow-400" checked> AVWAP BUY marks</label>
       <label class="flex items-center gap-1 text-xs text-gray-400" title="Always fit the right price axis to the visible candles, AVWAP and cloud"><input id="autoFitPrice" type="checkbox" class="accent-blue-500" checked> Auto-fit price</label>
       <label class="flex items-center gap-1 text-xs text-gray-400" title="Empty bars kept to the right of the last candle">Right space
@@ -1527,6 +1528,8 @@
     // =====================================================================
     const optInflight = new Set();
     let optLines = [], optCollapsed = false;
+    let optBoxOn = true;
+    try { const v = localStorage.getItem('avwap_optbox_on'); optBoxOn = v !== null ? v === '1' : !window.matchMedia('(max-width: 640px)').matches; } catch (e) {}
     try { optCollapsed = localStorage.getItem('avwap_optlabel_collapsed') === '1'; } catch (e) {}
     const fmtN0 = n => Number(n).toLocaleString();
     const shortN = n => { n = Number(n); return n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(n); };
@@ -1554,11 +1557,12 @@
       const el = $('optLabel'); if (!el) return;
       const sym = activeSym();
       if (!sym || !rawBars || !rawBars.length) { el.classList.add('hidden'); clearOptLines(); return; }
+      if (!optBoxOn) { el.classList.add('hidden'); drawOptLines(optScan.get(sym)); return; }
       el.classList.remove('hidden');
       const sc = optScan.get(sym), loading = optInflight.has(sym), canFetch = hasCreds() && !cacheOnly();
       const head = `<div class="flex items-center justify-between gap-3">
         <button data-optcollapse type="button" class="font-semibold text-gray-200">${optCollapsed ? '▸' : '▾'} OPTION · ${esc(sym)}</button>
-        <button data-optrefresh type="button" title="Refresh options data">${loading ? '…' : '⟳'}</button></div>`;
+        <span class="flex items-center gap-2"><button data-optrefresh type="button" title="Refresh options data">${loading ? '…' : '⟳'}</button><button data-opthide type="button" title="Hide this box (re-enable with the Options box checkbox)">✕</button></span></div>`;
       if (optCollapsed) { el.innerHTML = head; drawOptLines(sc); return; }
       let body = '';
       if (loading) body = '<div class="text-gray-400 pt-1">Loading options…</div>';
@@ -2202,12 +2206,20 @@
     $('chartBuyMarks').addEventListener('change', () => { try { localStorage.setItem('avwap_chart_buy_marks', $('chartBuyMarks').checked ? '1' : '0'); } catch (e) {} runStrategyAndRender(); });
     try { const v = localStorage.getItem('avwap_chart_buy_marks'); if (v !== null) $('chartBuyMarks').checked = v === '1'; } catch (e) {}
     $('buyBars').addEventListener('input', renderWatchlistTable);
+    function setOptBox(on) {
+      optBoxOn = on; $('optBoxChk').checked = on;
+      try { localStorage.setItem('avwap_optbox_on', on ? '1' : '0'); } catch (e) {}
+      renderOptLabel();
+    }
+    $('optBoxChk').checked = optBoxOn;
+    $('optBoxChk').addEventListener('change', () => setOptBox($('optBoxChk').checked));
     $('optLabel').addEventListener('click', e => {
       if (e.target.closest('[data-optcollapse]')) {
         optCollapsed = !optCollapsed;
         try { localStorage.setItem('avwap_optlabel_collapsed', optCollapsed ? '1' : '0'); } catch (err) {}
         renderOptLabel(); return;
       }
+      if (e.target.closest('[data-opthide]')) { setOptBox(false); return; }
       if (e.target.closest('[data-optrefresh]')) {
         if (!hasCreds()) { alert('Please enter your Alpaca API Key and Secret in the top panel.'); return; }
         autoOptions(activeSym(), true); return;

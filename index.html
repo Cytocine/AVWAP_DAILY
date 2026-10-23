@@ -324,6 +324,7 @@
           <select id="optFeed" class="px-1 py-0.5 rounded"><option value="indicative">indicative</option><option value="opra">opra</option></select></label>
         <label class="flex items-center gap-1.5"><input id="scanBullOnly" type="checkbox" class="accent-green-500" checked> Scan daily-bullish only</label>
         <label class="flex items-center gap-1.5" title="Daily bullish + 30m EMA10 &gt; EMA20 + an option contract above the volume threshold"><input id="wlSetupOnly" type="checkbox" class="accent-green-500"> Setups only</label>
+        <label class="flex items-center gap-1.5" title="Only show symbols where FastEMA crossed above AVWAP (close above AVWAP) within the last N bars"><input id="wlBuyOnly" type="checkbox" class="accent-green-500"> AVWAP buy within <input id="buyBars" type="number" min="1" max="100" value="5" class="w-12 px-1 py-0.5 rounded"> bars</label>
         <label class="flex items-center gap-1.5" title="After Update All finishes, scan 30m + options for the daily-bullish symbols"><input id="scanAfterUpdate" type="checkbox" class="accent-green-500" checked> Auto-scan after Update All</label>
         <button id="wlCsvBtn" type="button" class="bg-gray-700 hover:bg-gray-600 text-gray-200 px-2 py-0.5 rounded text-xs">CSV</button>
       </div>
@@ -337,6 +338,7 @@
               <th class="p-2">Close</th>
               <th class="p-2">vs AVWAP</th>
               <th class="p-2">State</th>
+              <th class="p-2" title="ThinkorSwim AVWAP: FastEMA crosses above AVWAP and close > AVWAP">AVWAP Buy</th>
               <th class="p-2" title="30-minute EMA10 &gt; EMA20">30m</th>
               <th class="p-2" title="Highest single-contract volume found in the scanned chain">Options</th>
               <th class="p-2"></th>
@@ -445,6 +447,7 @@
       <button id="drawLoadBtn" title="Import drawings from a JSON file (merged with existing)" class="bg-gray-700 text-gray-200 hover:bg-gray-600 px-2 py-0.5 rounded text-xs">Load JSON</button>
       <input id="drawLoadFile" type="file" accept=".json,application/json" class="hidden">
       <span class="text-gray-700">|</span>
+      <label class="flex items-center gap-1 text-xs text-gray-400" title="Mark every scanner signal on the chart: FastEMA crosses above AVWAP with close above AVWAP"><input id="chartBuyMarks" type="checkbox" class="accent-yellow-400" checked> AVWAP BUY marks</label>
       <label class="flex items-center gap-1 text-xs text-gray-400" title="Always fit the right price axis to the visible candles, AVWAP and cloud"><input id="autoFitPrice" type="checkbox" class="accent-blue-500" checked> Auto-fit price</label>
       <label class="flex items-center gap-1 text-xs text-gray-400" title="Empty bars kept to the right of the last candle">Right space
         <input id="rightSpace" type="number" min="0" max="200" value="12" class="px-1 py-0.5 rounded text-xs" style="width:52px">
@@ -1242,8 +1245,44 @@
       const slow = calculateEMA(closes, slowLen)[i];
       const atr = calculateATR(slice, atrLen)[i] || closes[i] * 0.02;
       const bull = fast > slow && Math.abs(fast - slow) > atr * mult && closes[i] > vwap;
-      return { bull, close: closes[i], pct: (closes[i] / vwap - 1) * 100 };
+      return { bull, close: closes[i], pct: (closes[i] / vwap - 1) * 100, buyAge: avwapBuyAge(slice, fastLen, anchorN) };
     }
+
+    // ThinkorSwim-style AVWAP (ExpAverage(hlc3*vol)/ExpAverage(vol)) + fast EMA cross buy signal.
+    // Returns how many bars ago the most recent BUY fired (0 = latest bar), or null if none in the last 100 bars.
+    function tosExpAvg(values, len) {
+      const k = 2 / (len + 1), out = new Array(values.length);
+      let prev = values[0];
+      for (let i = 0; i < values.length; i++) { prev = i === 0 ? values[0] : values[i] * k + prev * (1 - k); out[i] = prev; }
+      return out;
+    }
+    function avwapBuyAge(bars, fastLen, anchorN) {
+      if (bars.length < 3) return null;
+      const closes = bars.map(b => b.c);
+      const num = tosExpAvg(bars.map(b => ((b.h + b.l + b.c) / 3) * b.v), anchorN);
+      const den = tosExpAvg(bars.map(b => b.v), anchorN);
+      const fast = tosExpAvg(closes, fastLen);
+      const av = num.map((n, i) => den[i] !== 0 ? n / den[i] : 0);
+      const last = bars.length - 1;
+      for (let i = last; i >= Math.max(1, last - 100); i--) {
+        // buySignal = (FastEMA crosses above AVWAP) and close > AVWAP
+        if (fast[i] > av[i] && fast[i - 1] <= av[i - 1] && closes[i] > av[i]) return last - i;
+      }
+      return null;
+    }
+    function avwapBuyIndices(bars, fastLen, anchorN) {
+      const out = [];
+      if (bars.length < 3) return out;
+      const closes = bars.map(b => b.c);
+      const num = tosExpAvg(bars.map(b => ((b.h + b.l + b.c) / 3) * b.v), anchorN);
+      const den = tosExpAvg(bars.map(b => b.v), anchorN);
+      const fast = tosExpAvg(closes, fastLen);
+      const av = num.map((n, i) => den[i] !== 0 ? n / den[i] : 0);
+      for (let i = 1; i < bars.length; i++) if (fast[i] > av[i] && fast[i - 1] <= av[i - 1] && closes[i] > av[i]) out.push(i);
+      return out;
+    }
+    function buyLookback() { const v = parseInt($('buyBars').value); return isNaN(v) || v < 0 ? 5 : v; }
+    function buyHit(st) { return !!(st && st.buyAge != null && st.buyAge <= buyLookback() - 1); }
 
     function makeRowInfo(rec) {
       if (!rec || !rec.bars.length) return null;
@@ -1276,8 +1315,9 @@
     }
 
     function visibleSymbols() {
-      const bullOnly = $('wlBullOnly').checked, setupOnly = $('wlSetupOnly').checked;
+      const bullOnly = $('wlBullOnly').checked, setupOnly = $('wlSetupOnly').checked, buyOnly = $('wlBuyOnly').checked;
       return currentList().filter(s => {
+        if (buyOnly) { const bi = rowInfo.get(s); if (!buyHit(bi && bi.state)) return false; }
         if (setupOnly) return setupState(s).all;
         if (!bullOnly) return true;
         const i = rowInfo.get(s);
@@ -1294,7 +1334,7 @@
       $('wlCount').textContent = all.length ? `(${syms.length === all.length ? all.length : syms.length + ' of ' + all.length})` : '';
 
       if (!syms.length) {
-        tbody.innerHTML = `<tr><td colspan="9" class="p-3 text-center text-gray-500">${
+        tbody.innerHTML = `<tr><td colspan="10" class="p-3 text-center text-gray-500">${
           all.length ? 'No symbols match the current filter.' : 'Watchlist is empty. Paste symbols on the left and click Save List.'}</td></tr>`;
         return;
       }
@@ -1306,6 +1346,10 @@
         const pill = st ? (st.bull ? '● Bullish' : '○ Neutral / Bear') : '—';
         const pctCls = st ? (st.pct >= 0 ? 'text-green-400' : 'text-red-400') : 'text-gray-600';
         const sc = optScan.get(sym), ss = setupState(sym);
+        const buyCell = !st ? '<span class="text-gray-600">—</span>'
+          : buyHit(st) ? `<span class="text-green-400 font-semibold" title="FastEMA crossed above AVWAP with close > AVWAP">▲ BUY ${st.buyAge === 0 ? 'now' : st.buyAge + ' bar' + (st.buyAge > 1 ? 's' : '') + ' ago'}</span>`
+          : st.buyAge != null ? `<span class="text-gray-500" title="Last buy signal is older than the lookback">${st.buyAge} bars ago</span>`
+          : '<span class="text-gray-600">—</span>';
         const fmtN = n => Number(n).toLocaleString();
         const c30 = !sc ? '<span class="text-gray-600">—</span>'
           : sc.bull30 === null ? `<span class="text-amber-400" title="${sc.err || 'no data'}">n/a</span>`
@@ -1322,6 +1366,7 @@
           <td class="p-2 font-mono">${st ? '$' + st.close.toFixed(2) : '—'}</td>
           <td class="p-2 font-mono ${pctCls}">${st ? (st.pct >= 0 ? '+' : '') + st.pct.toFixed(1) + '%' : '—'}</td>
           <td class="p-2 ${pillCls}">${pill}</td>
+          <td class="p-2 whitespace-nowrap">${buyCell}</td>
           <td class="p-2 whitespace-nowrap">${c30}</td>
           <td class="p-2 whitespace-nowrap">${cOpt}</td>
           <td class="p-2 text-right whitespace-nowrap"><button data-dl="${sym}" title="Download / update this stock and scan 30m + options" class="text-gray-500 hover:text-blue-400 px-1">⟳</button><button data-remove="${sym}" title="Remove from list (cached candles are kept)" class="text-gray-500 hover:text-red-400 px-1">✕</button></td>
@@ -1462,12 +1507,12 @@
     function exportTableCsv() {
       const q = v => { v = v == null ? '' : String(v); return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v; };
       const rows = [['Symbol', 'Cached bars', 'Last bar', 'Close', 'vs AVWAP %', 'Daily state', '30m EMA10', '30m EMA20', '30m EMA10>EMA20',
-        'Option max volume', 'Option contract', 'Setup']];
+        'Option max volume', 'Option contract', 'Setup', 'AVWAP buy bars ago']];
       for (const sym of visibleSymbols()) {
         const i = rowInfo.get(sym), st = i && i.state, sc = optScan.get(sym) || {}, ss = setupState(sym);
         rows.push([sym, i ? i.n : '', i ? fmtBarTime(i.last, i.timeframe) : '', st ? st.close.toFixed(2) : '', st ? st.pct.toFixed(2) : '',
           st ? (st.bull ? 'Bullish' : 'Neutral/Bear') : '', sc.e10 != null ? sc.e10.toFixed(2) : '', sc.e20 != null ? sc.e20.toFixed(2) : '',
-          sc.bull30 == null ? '' : (sc.bull30 ? 'yes' : 'no'), sc.optVol == null ? '' : sc.optVol, sc.optSym || '', ss.all ? 'YES' : '']);
+          sc.bull30 == null ? '' : (sc.bull30 ? 'yes' : 'no'), sc.optVol == null ? '' : sc.optVol, sc.optSym || '', ss.all ? 'YES' : '', st && st.buyAge != null ? st.buyAge : '']);
       }
       const blob = new Blob([rows.map(r => r.map(q).join(',')).join('\n')], { type: 'text/csv' });
       const a = document.createElement('a');
@@ -1929,6 +1974,12 @@
         }
       }
 
+      if ($('chartBuyMarks') && $('chartBuyMarks').checked) {
+        for (const i of avwapBuyIndices(rawBars, fastLen, barsAnchor)) {
+          markers.push({ time: rawBars[i].time, position: 'belowBar', color: '#fbbf24', shape: 'arrowUp', text: 'AVWAP BUY' });
+        }
+      }
+      markers.sort((a, b) => (a.time > b.time) - (a.time < b.time));
       candleSeries.setMarkers(markers);
       renderMetrics(trades, isBullishState(closes.length - 1, emaFast, emaSlow, atr, minHeightMult, closes, avwap));
       renderTradeTable(trades);
@@ -2147,6 +2198,10 @@
 
     $('wlBullOnly').addEventListener('change', renderWatchlistTable);
     $('wlSetupOnly').addEventListener('change', renderWatchlistTable);
+    $('wlBuyOnly').addEventListener('change', renderWatchlistTable);
+    $('chartBuyMarks').addEventListener('change', () => { try { localStorage.setItem('avwap_chart_buy_marks', $('chartBuyMarks').checked ? '1' : '0'); } catch (e) {} runStrategyAndRender(); });
+    try { const v = localStorage.getItem('avwap_chart_buy_marks'); if (v !== null) $('chartBuyMarks').checked = v === '1'; } catch (e) {}
+    $('buyBars').addEventListener('input', renderWatchlistTable);
     $('optLabel').addEventListener('click', e => {
       if (e.target.closest('[data-optcollapse]')) {
         optCollapsed = !optCollapsed;
@@ -2207,7 +2262,7 @@
     });
     // remember scan settings
     {
-      const CK = 'avwap_scan_cfg_v1', ids = ['optMinVol', 'optMinDte', 'optMaxDte', 'optType', 'optFeed'], chk = ['scanBullOnly', 'wlSetupOnly', 'optAuto', 'optLinesChk', 'scanAfterUpdate'];
+      const CK = 'avwap_scan_cfg_v1', ids = ['optMinVol', 'optMinDte', 'optMaxDte', 'optType', 'optFeed', 'buyBars'], chk = ['scanBullOnly', 'wlSetupOnly', 'wlBuyOnly', 'optAuto', 'optLinesChk', 'scanAfterUpdate'];
       try {
         const c = JSON.parse(localStorage.getItem(CK) || '{}');
         ids.forEach(id => { if (c[id] !== undefined) $(id).value = c[id]; });
